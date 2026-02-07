@@ -1,0 +1,93 @@
+# format: KEYCODE KEY [MODIFIER=KEY]
+# if no modifiers are specifier, they don't affect the key
+# to disable key when modifier is pressed, set MODIFIER=None
+
+0  Escape
+1  F1
+2  F2
+3  F3
+4  F4
+5  F5
+6  F6
+7  F7
+8  F8
+9  F9
+10 F10
+11 F11
+12 F12
+13 Insert
+14 PrintScreen
+15 Delete
+16 Home
+17 End
+18 PageUp
+19 PageDown
+20 ScrollLock
+
+45 Backspace
+
+64 Tab
+65 Q
+66 W
+67 E
+68 R
+69 T
+70 Y
+71 U
+72 I
+73 O
+74 P
+
+96  CapsLock
+97  A
+98  S
+99  D
+100 F
+101 G
+102 H
+103 J
+104 K
+105 L
+109 Enter
+
+128 LShift
+130 Z
+131 X
+132 C
+133 V
+134 B
+135 N
+136 M
+140 RShift
+
+160 LControl
+161 Super
+162 LAlt
+163 Space
+164 RAlt
+165 RControl
+
+# numpad (tl corner at (1, 23))
+56  NumLock
+57  NumpadDivide
+58  NumpadMultiply
+59  NumpadMinus
+88  Numpad7
+89  Numpad8
+90  Numpad9
+91  NumpadPlus
+120 Numpad4
+121 Numpad5
+122 Numpad6
+152 Numpad1
+153 Numpad2
+154 Numpad3
+155 NumpadEnter
+184 Numpad0
+185 NumpadDecimal
+
+# arrows (virtually on 5th row)
+192 ArrowUp
+193 ArrowLeft
+194 ArrowDown
+195 ArrowRight

@@ -1,0 +1,33 @@
+# format: KEYCODE KEY [MODIFIER=KEY]
+# if no modifiers are specifier, they don't affect the key
+# to disable key when modifier is pressed, set MODIFIER=None
+
+include "qwerty.keymap"
+
+mod shift
+
+32 BackTick  shift=Tilde
+33 Key1      shift=Exclamation
+34 Key2      shift=AtSign
+35 Key3      shift=Hashtag
+36 Key4      shift=Dollar
+37 Key5      shift=Percent
+38 Key6      shift=Caret
+39 Key7      shift=Ampersand
+40 Key8      shift=Asterix
+41 Key9      shift=OpenParenthesis
+42 Key0      shift=CloseParenthesis
+43 Hyphen    shift=Underscore
+44 Equals    shift=Plus
+
+75 OpenSquareBracket  shift=OpenCurlyBracket
+76 CloseSquareBracket shift=CloseCurlyBracket
+
+106 Semicolon   shift=Colon
+107 SingleQuote shift=DoubleQuote
+108 BackSlash   shift=Pipe
+
+129 LessThan shift=GreaterThan
+137 Comma    shift=LessThan
+138 Period   shift=GreaterThan
+139 Slash    shift=Question

@@ -14,9 +14,16 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
+
+#define USE_UNIX_SOCKET 1
+
+#if USE_UNIX_SOCKET
+#include <sys/un.h>
+#else
+#include <netinet/in.h>
+#endif
 
 #include <X11/keysym.h>
 #include <X11/X.h>
@@ -2561,23 +2568,37 @@ int main()
 		return 1;
 	}
 
+#if USE_UNIX_SOCKET
 	int server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+#else
+	int server_sock = socket(AF_INET, SOCK_STREAM, 0);
+#endif
 	if (server_sock == -1)
 	{
 		perror("xbanan: socket");
 		return 1;
 	}
 
+#if USE_UNIX_SOCKET
 	const sockaddr_un addr {
 		.sun_family = AF_UNIX,
 		.sun_path = "/tmp/.X11-unix/X69"
 	};
+#else
+	const sockaddr_in addr {
+		.sin_family = AF_INET,
+		.sin_port = htons(6069),
+		.sin_addr = htonl(INADDR_LOOPBACK),
+	};
+#endif
 	if (bind(server_sock, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == -1)
 	{
 		perror("xbanan: bind");
 		return 1;
 	}
+#if USE_UNIX_SOCKET
 	atexit([] { unlink("/tmp/.X11-unix/X69"); });
+#endif
 
 	if (listen(server_sock, SOMAXCONN) == -1)
 	{

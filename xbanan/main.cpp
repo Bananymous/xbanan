@@ -1,3 +1,4 @@
+#include <BAN/Array.h>
 #include <BAN/ByteSpan.h>
 #include <BAN/Endianness.h>
 #include <BAN/Optional.h>
@@ -317,19 +318,32 @@ xVisualType visual {
 
 struct Client
 {
-	enum class State
+	enum class State : uint8_t
 	{
 		ConnectionSetup,
 		Connected,
 	};
 	int fd;
 	State state;
+	bool has_epollout { false };
+	bool has_bigrequests { false };
 	CARD16 sequence { 0 };
 	BAN::Vector<uint8_t> input_buffer;
 	BAN::Vector<uint8_t> output_buffer;
 
 	BAN::HashMap<CARD32, BAN::UniqPtr<Object>> objects;
 };
+
+struct Extension
+{
+	BAN::StringView name;
+	uint8_t major_opcode;
+	uint8_t opcode_count;
+	BAN::ErrorOr<void> (*handler)(Client&, BAN::ConstByteSpan);
+};
+
+uint8_t g_extension_opcode { 128 };
+BAN::Array<Extension, 128> g_extensions;
 
 BAN::HashMap<BAN::String, ATOM> g_atoms_name_to_id;
 BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
@@ -634,6 +648,8 @@ void _invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t x, in
 {
 	ASSERT(wid != root.windowId);
 
+	if (x + w <= 0 || y + h <= 0)
+		return;
 	if (w <= 0 || h <= 0)
 		return;
 
@@ -653,15 +669,21 @@ void _invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t x, in
 		if (!child_window.mapped)
 			continue;
 
+		const auto child_x = x - child_window.x;
+		const auto child_y = y - child_window.y;
+
+		const auto child_w = BAN::Math::min<int32_t>(w - child_window.x, child_window.texture().width() - child_x);
+		const auto child_h = BAN::Math::min<int32_t>(h - child_window.y, child_window.texture().height() - child_y);
+
 		_invalidate_window_recursive(
 			client_info,
 			child_wid,
-			x - child_window.x,
-			y - child_window.y,
-			w - child_window.x,
-			h - child_window.y
+			child_x, child_y,
+			child_w, child_h
 		);
 	}
+
+	dwarnln("invalidate {} {},{} -> {},{}", wid, x, y, x + w, y + h);
 
 	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
 		return;
@@ -672,8 +694,8 @@ void _invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t x, in
 	auto& parent_window = parent_object.object.get<Object::Window>();
 	parent_window.texture().copy_texture(
 		window.texture(),
-		parent_window.x + x,
-		parent_window.y + y,
+		window.x + x,
+		window.y + y,
 		x,
 		y,
 		w,
@@ -728,7 +750,7 @@ void invalidate_window(Client& client_info, WINDOW wid, int32_t x, int32_t y, in
 		}
 	}
 
-	window.window.get<BAN::UniqPtr<LibGUI::Window>>()->invalidate(x, y, w, h);
+	window.window.get<BAN::UniqPtr<LibGUI::Window>>()->invalidate(min_x, min_y, max_x - min_x, max_y - min_y);
 }
 
 BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
@@ -753,10 +775,10 @@ BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 		auto attributes = gui_window->get_attributes();
 		attributes.shown = true;
 		gui_window->set_attributes(attributes);
-	}
 
-	if (is_visible(client_info, window.parent))
-		TRY(send_visibility_events_recursively(client_info, wid, true));
+		gui_window->texture().clear();
+		gui_window->invalidate();
+	}
 
 	if (window.event_mask & StructureNotifyMask)
 	{
@@ -789,6 +811,9 @@ BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 		event.u.u.sequenceNumber = client_info.sequence;
 		TRY(encode(client_info.output_buffer, event));
 	}
+
+	if (is_visible(client_info, window.parent))
+		TRY(send_visibility_events_recursively(client_info, wid, true));
 
 	if (window.event_mask & ExposureMask)
 	{
@@ -994,6 +1019,15 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 	client_info.sequence++;
 
+	if (packet[0] >= 128)
+	{
+		const auto& extension = g_extensions[packet[0] - 128];
+		if (extension.handler != nullptr)
+			return extension.handler(client_info, packet);
+		dwarnln("invalid opcode {}", packet[0]);
+		return BAN::Error::from_errno(EINVAL);
+	}
+
 	switch (packet[0])
 	{
 		case X_CreateWindow:
@@ -1014,7 +1048,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  mask:    {8h}", request.mask);
 
 			uint32_t event_mask { 0 };
-			uint32_t background { 0x000000 };
+			uint32_t background { 0xFF00FF };
 
 			for (size_t i = 0; i < 32; i++)
 			{
@@ -1077,7 +1111,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto& parent_window = parent_object->object.get<Object::Window>();
 			TRY(parent_window.children.push_back(request.wid));
 
-			auto it = TRY(client_info.objects.insert(
+			TRY(client_info.objects.insert(
 				request.wid,
 				TRY(BAN::UniqPtr<Object>::create(Object {
 					.type = Object::Type::Window,
@@ -1637,7 +1671,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			}
 			
 			auto& property = it->value;
-			ASSERT(property.type == request.type);
 			ASSERT(property.format == request.format);
 
 			const size_t bytes = (request.format / 8) * request.nUnits;
@@ -1650,11 +1683,13 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					memcpy(property.data.data(), packet.data(), bytes);
 					break;
 				case PropModePrepend:
+					ASSERT(property.type == request.type);
 					TRY(property.data.resize(old_bytes + bytes));
 					memmove(property.data.data() + old_bytes, property.data.data(), old_bytes);
 					memcpy(property.data.data(), packet.data(), bytes);
 					break;
 				case PropModeAppend:
+					ASSERT(property.type == request.type);
 					TRY(property.data.resize(old_bytes + bytes));
 					memcpy(property.data.data() + old_bytes, packet.data(), bytes);
 					break;
@@ -2223,7 +2258,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						data_u32[y * w + x] = foreground;
 
 				if (object.type == Object::Type::Window)
-					invalidate_window(client_info, request.drawable, rect.x, rect.y, rect.width, rect.height);
+					invalidate_window(client_info, request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
 			}
 
 			break;
@@ -2269,8 +2304,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				const int32_t min_x = BAN::Math::max<int32_t>(0, arc.x);
 				const int32_t min_y = BAN::Math::max<int32_t>(0, arc.y);
 				
-				const int32_t max_x = BAN::Math::max<int32_t>(texture.width(),  arc.x + arc.width);
-				const int32_t max_y = BAN::Math::max<int32_t>(texture.height(), arc.y + arc.height);
+				const int32_t max_x = BAN::Math::min<int32_t>(texture.width(),  arc.x + arc.width);
+				const int32_t max_y = BAN::Math::min<int32_t>(texture.height(), arc.y + arc.height);
 
 				const auto rx = arc.width / 2;
 				const auto ry = arc.height / 2;
@@ -2490,6 +2525,16 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.first_event = 0,
 				.first_error = 0,
 			};
+
+			for (const auto& extension : g_extensions)
+			{
+				if (extension.name != name)
+					continue;
+				reply.present = xTrue;
+				reply.major_opcode = extension.major_opcode;
+				break;
+			}
+
 			TRY(encode(client_info.output_buffer, reply));
 
 			break;
@@ -2555,6 +2600,50 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 	}
 
 	return {};
+}
+
+BAN::ErrorOr<void> extension_bigrequests(Client& client_info, BAN::ConstByteSpan packet)
+{
+	switch (packet[1])
+	{
+		case 0:
+		{
+			xGenericReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.data00 = (16 << 20) / 4, // 16 MiB
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			client_info.has_bigrequests = true;
+
+			dprintln("client enabled big requests");
+
+			break;
+		}
+		default:
+			dwarnln("invalid BIG-REQUESTS minor opcode {}", packet[1]);
+			return BAN::Error::from_errno(EINVAL);
+	}
+
+	return {};
+}
+
+void install_extensions()
+{
+	const auto install_extension =
+		[](BAN::StringView name, BAN::ErrorOr<void> (*handler)(Client&, BAN::ConstByteSpan))
+		{
+			g_extensions[g_extension_opcode - 128] = {
+				.name = name,
+				.major_opcode = g_extension_opcode,
+				.handler = handler,
+			};
+			g_extension_opcode++;
+		};
+
+	install_extension("BIG-REQUESTS"_sv, extension_bigrequests);
 }
 
 int main()
@@ -2694,6 +2783,8 @@ int main()
 	APPEND_ATOM(XA_WM_TRANSIENT_FOR);
 #undef APPEND_ATOM
 
+	install_extensions();
+
 	printf("xbanan started\n");
 
 	const auto close_client =
@@ -2773,7 +2864,13 @@ int main()
 			ASSERT(epoll_thingy.type == EpollThingy::Type::Client);
 
 			auto& client_info = epoll_thingy.value.get<Client>();
-			
+
+			if (events[i].events & EPOLLHUP)
+			{
+				close_client(client_info.fd);
+				continue;
+			}
+
 			if (events[i].events & EPOLLOUT)
 			{
 				const ssize_t nsend = send(
@@ -2783,11 +2880,14 @@ int main()
 					0
 				);
 
+				if (nsend == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+					goto send_done;
+
 				if (nsend < 0)
 					perror("xbanan: send");
 				if (nsend <= 0)
 				{
-					close_client(events[i].data.fd);
+					close_client(client_info.fd);
 					continue;
 				}
 
@@ -2804,10 +2904,15 @@ int main()
 					if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
 					{
 						perror("xbanan: epoll_ctl");
-						close_client(events[i].data.fd);
+						close_client(client_info.fd);
 						continue;
 					}
+
+					client_info.has_epollout = false;
 				}
+
+			send_done:
+				(void)0;
 			}
 
 			if (!(events[i].events & EPOLLIN))
@@ -2818,12 +2923,13 @@ int main()
 				case Client::State::ConnectionSetup:
 				{
 					xConnClientPrefix client_prefix;
-					ssize_t nrecv = recv(client_info.fd, &client_prefix, sizeof(client_prefix), 0);
+
+					const ssize_t nrecv = recv(client_info.fd, &client_prefix, sizeof(client_prefix), 0);
 					if (nrecv < 0)
 						perror("xbanan: recv");
 					if (nrecv <= 0)
 					{
-						close_client(events[i].data.fd);
+						close_client(client_info.fd);
 						continue;
 					}
 
@@ -2832,7 +2938,7 @@ int main()
 					if (auto ret = setup_client_conneciton(client_info, client_prefix); ret.is_error())
 					{
 						dwarnln("setup_client_connection: {}", ret.error());
-						close_client(events[i].data.fd);
+						close_client(client_info.fd);
 						continue;
 					}
 
@@ -2842,12 +2948,12 @@ int main()
 				{
 					char buffer[1024] {};
 
-					ssize_t nrecv = recv(client_info.fd, buffer, sizeof(buffer), 0);
+					const ssize_t nrecv = recv(client_info.fd, buffer, sizeof(buffer), 0);
 					if (nrecv < 0)
 						perror("xbanan: recv");
 					if (nrecv <= 0)
 					{
-						close_client(events[i].data.fd);
+						close_client(client_info.fd);
 						continue;
 					}
 
@@ -2860,16 +2966,34 @@ int main()
 						if (client_info.input_buffer.size() < 4)
 							break;
 
-						const uint32_t byte_length = 4 * reinterpret_cast<const uint16_t*>(client_info.input_buffer.data())[1];
+						bool is_big_request = false;
+						uint32_t byte_length = 4 * *reinterpret_cast<const uint16_t*>(client_info.input_buffer.data() + 2);
+
+						if (byte_length == 0 && client_info.has_bigrequests)
+						{
+							if (client_info.input_buffer.size() < 8)
+								break;
+							byte_length = 4 * *reinterpret_cast<const uint32_t*>(client_info.input_buffer.data() + 4);
+							is_big_request = true;
+						}
+
 						if (client_info.input_buffer.size() < byte_length)
 							break;
 
 						auto packet = BAN::ConstByteSpan(client_info.input_buffer.span()).slice(0, byte_length);
+						if (is_big_request)
+						{
+							auto* input_u32 = reinterpret_cast<uint32_t*>(client_info.input_buffer.data());
+							input_u32[1] = input_u32[0];
+							packet = packet.slice(4);
+
+							dprintln("handling big request");
+						}
 
 						if (auto ret = handle_packet(client_info, packet); ret.is_error())
 						{
 							dwarnln("handle_packet: {}", ret.error());
-							close_client(events[i].data.fd);
+							close_client(client_info.fd);
 							continue;
 						}
 
@@ -2889,7 +3013,7 @@ int main()
 				continue;
 
 			auto& client_info = thingy.value.get<Client>();
-			if (client_info.output_buffer.empty())
+			if (client_info.output_buffer.empty() || client_info.has_epollout)
 				continue;
 
 			epoll_event event { .events = EPOLLIN | EPOLLOUT, .data = { .fd = client_info.fd } };
@@ -2899,6 +3023,8 @@ int main()
 				close_client(client_info.fd);
 				goto iterator_invalidated;
 			}
+
+			client_info.has_epollout = true;
 		}
 	}
 }

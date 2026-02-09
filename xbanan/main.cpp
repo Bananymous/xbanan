@@ -68,8 +68,8 @@ struct Object
 		bool mapped { false };
 		int32_t x { 0 };
 		int32_t y { 0 };
-		int32_t cursor_x { 0 };
-		int32_t cursor_y { 0 };
+		int32_t cursor_x { -1 };
+		int32_t cursor_y { -1 };
 		uint32_t event_mask { 0 };
 		WINDOW parent;
 		CARD16 c_class;
@@ -683,8 +683,6 @@ void _invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t x, in
 		);
 	}
 
-	dwarnln("invalidate {} {},{} -> {},{}", wid, x, y, x + w, y + h);
-
 	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
 		return;
 
@@ -953,14 +951,49 @@ BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 	return {};
 }
 
-void update_cursor_position(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+WINDOW find_child_window(Client& client_info, WINDOW wid, int32_t x, int32_t y)
 {
 	auto& object = *client_info.objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
-	window.cursor_x = x;
-	window.cursor_y = y;
+
+	uint32_t width, height;
+	if (wid == root.windowId)
+	{
+		width = root.pixWidth;
+		height = root.pixHeight;
+	}
+	else
+	{
+		auto& texture = window.texture();
+		width = texture.width();
+		height = texture.height();
+	}
+	if (x < 0 || y < 0 || x >= width || y >= height)
+		return None;
+
+	for (auto child_wid : window.children)
+	{
+		auto& child_object = *client_info.objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+
+		auto& child_window = child_object.object.get<Object::Window>();
+		if (auto result = find_child_window(client_info, child_wid, x - child_window.x, y - child_window.y); result != None)
+			return result;
+	}
+
+	return wid;
+}
+
+void send_mouse_move_events(Client& client_info, WINDOW wid, WINDOW event_child_wid, LibGUI::EventPacket::MouseMoveEvent::event_t event)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	window.cursor_x = event.x;
+	window.cursor_y = event.y;
 
 	for (auto child_wid : window.children)
 	{
@@ -968,8 +1001,284 @@ void update_cursor_position(Client& client_info, WINDOW wid, int32_t x, int32_t 
 		ASSERT(child_object.type == Object::Type::Window);
 
 		auto& child_window = object.object.get<Object::Window>();
-		update_cursor_position(client_info, child_wid, child_window.x + x, child_window.y + y);
+
+		auto child_event = event;
+		child_event.x -= child_window.x;
+		child_event.y -= child_window.y;
+
+		send_mouse_move_events(client_info, child_wid, event_child_wid, child_event);
 	}
+
+	auto& texture = window.texture();
+	if (event.x < 0 || event.y < 0 || event.x >= texture.width() || event.y >= texture.height())
+		return;
+
+	if (!(window.event_mask & PointerMotionMask))
+		return;
+
+	xEvent xevent { .u = {
+		.keyButtonPointer = {
+			.time = static_cast<CARD32>(time(nullptr)),
+			.root = root.windowId,
+			.event = wid,
+			.child = event_child_wid,
+			.rootX = static_cast<INT16>(event.x),
+			.rootY = static_cast<INT16>(event.y),
+			.eventX = static_cast<INT16>(event.x),
+			.eventY = static_cast<INT16>(event.y),
+			.state = 0,
+			.sameScreen = xTrue,
+		}
+	}};
+	xevent.u.u.type = MotionNotify,
+	xevent.u.u.detail = NotifyNormal;
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
+}
+
+BAN::Vector<WINDOW> get_path_to_child(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+{
+	BAN::Vector<WINDOW> result;
+
+	const auto window_contains =
+		[](const Object::Window& window, int32_t x, int32_t y) -> bool
+		{
+			const auto& texture = window.texture();
+			return x >= 0 && y >= 0 && x < texture.width() && y < texture.height();
+		};
+
+	for (;;)
+	{
+		const auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+
+		const auto& window = object.object.get<Object::Window>();
+		if (!window_contains(window, x, y))
+			break;
+		
+		MUST(result.push_back(wid));
+
+		const WINDOW old_wid = wid;
+		for (auto child_wid : window.children)
+		{
+			const auto& child_object = *client_info.objects[child_wid];
+			ASSERT(child_object.type == Object::Type::Window);
+
+			const auto& child_window = child_object.object.get<Object::Window>();
+			if (!window_contains(child_window, x - child_window.x, y - child_window.y))
+				continue;
+			wid = child_wid;
+			break;
+		}
+
+		if (old_wid == wid)
+			break;
+	}
+
+	return result;
+}
+
+void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
+{
+	const auto old_child_path = get_path_to_child(client_info, wid, old_x, old_y);
+	const auto new_child_path = get_path_to_child(client_info, wid, new_x, new_y);
+
+	size_t common_ancestors = 0;
+	while (common_ancestors < old_child_path.size() && common_ancestors < new_child_path.size())
+	{
+		if (old_child_path[common_ancestors] != new_child_path[common_ancestors])
+			break;
+		common_ancestors++;
+	}
+
+	if (old_child_path.size() == common_ancestors && new_child_path.size() == common_ancestors)
+		return;
+
+	const bool linear = (common_ancestors == old_child_path.size() || common_ancestors == new_child_path.size());
+
+	for (size_t i = 0; i < old_child_path.size() - common_ancestors; i++)
+	{
+		const bool first = (i == 0);
+		const BYTE detail =
+			[&]() -> BYTE {
+				if (!linear)
+					return first ? NotifyNonlinear : NotifyNonlinearVirtual;
+				if (!first)
+					return NotifyVirtual;
+				if (old_child_path.size() > new_child_path.size())
+					return NotifyAncestor;
+				return NotifyInferior;
+			}();
+
+		const auto& wid = old_child_path[old_child_path.size() - i - 1];
+		dwarnln("leave {} {}", wid, detail);
+
+		auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+		auto& window = object.object.get<Object::Window>();
+		if (!(window.event_mask & LeaveWindowMask))
+			continue;
+
+		xEvent xevent { .u = {
+			.enterLeave = {
+				.time = static_cast<CARD32>(time(nullptr)),
+				.root = root.windowId,
+				.event = wid,
+				.child = first ? static_cast<WINDOW>(None) : old_child_path.back(),
+				.rootX = static_cast<INT16>(old_x),
+				.rootY = static_cast<INT16>(old_x),
+				.eventX = static_cast<INT16>(old_x),
+				.eventY = static_cast<INT16>(old_x),
+				.state = 0,
+				.mode = NotifyNormal,
+			}
+		}};
+		xevent.u.u.type = LeaveNotify,
+		xevent.u.u.detail = detail;
+		xevent.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, xevent));
+	}
+
+	for (size_t i = 0; i < new_child_path.size() - common_ancestors; i++)
+	{
+		const bool last = (i == new_child_path.size() - common_ancestors - 1);
+		const BYTE detail =
+			[&]() -> BYTE {
+				if (!linear)
+					return last ? NotifyNonlinear : NotifyNonlinearVirtual;
+				if (!last)
+					return NotifyVirtual;
+				if (old_child_path.size() > new_child_path.size())
+					return NotifyInferior;
+				return NotifyAncestor;
+			}();
+
+		const auto& wid = new_child_path[common_ancestors + i];
+		dwarnln("enter {} {}", wid, detail);
+
+		auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+		auto& window = object.object.get<Object::Window>();
+		if (!(window.event_mask & EnterWindowMask))
+			continue;
+
+		xEvent xevent { .u = {
+			.enterLeave = {
+				.time = static_cast<CARD32>(time(nullptr)),
+				.root = root.windowId,
+				.event = wid,
+				.child = last ? static_cast<WINDOW>(None) : new_child_path.back(),
+				.rootX = static_cast<INT16>(old_x),
+				.rootY = static_cast<INT16>(old_x),
+				.eventX = static_cast<INT16>(old_x),
+				.eventY = static_cast<INT16>(old_x),
+				.state = 0,
+				.mode = NotifyNormal,
+			}
+		}};
+		xevent.u.u.type = EnterNotify,
+		xevent.u.u.detail = detail;
+		xevent.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, xevent));
+	}
+}
+
+void on_mouse_move_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::MouseMoveEvent::event_t event)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	send_enter_and_leave_events(client_info, wid, window.cursor_x, window.cursor_y, event.x, event.y);
+	send_mouse_move_events(client_info, wid, find_child_window(client_info, wid, event.x, event.y), event);
+}
+
+void on_mouse_button_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::MouseButtonEvent::event_t event)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	for (auto child_wid : window.children)
+	{
+		auto& child_object = *client_info.objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+
+		auto& child_window = object.object.get<Object::Window>();
+
+		auto child_event = event;
+		child_event.x -= child_window.x;
+		child_event.y -= child_window.y;
+
+		on_mouse_button_event(client_info, child_wid, child_event);
+	}
+
+	if (!(window.event_mask & (event.pressed ? ButtonPressMask : ButtonReleaseMask)))
+		return;
+
+	xEvent xevent { .u = {
+		.keyButtonPointer = {
+			.time = static_cast<CARD32>(time(nullptr)),
+			.root = root.windowId,
+			.event = wid,
+			.child = find_child_window(client_info, wid, event.x, event.y),
+			.rootX = static_cast<INT16>(event.x),
+			.rootY = static_cast<INT16>(event.y),
+			.eventX = static_cast<INT16>(event.x),
+			.eventY = static_cast<INT16>(event.y),
+			.state = 0,
+			.sameScreen = xTrue,
+		}
+	}};
+	xevent.u.u.type = event.pressed ? ButtonPress : ButtonRelease,
+	xevent.u.u.detail = static_cast<BYTE>(event.button) + 1;
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
+}
+
+void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t event)
+{
+	if (keymap.map[static_cast<BYTE>(event.key)] == XK_VoidSymbol)
+		return;
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	for (auto child_wid : window.children)
+		on_key_event(client_info, child_wid, event);
+
+	if (!(window.event_mask & (event.pressed() ? KeyPressMask : KeyReleaseMask)))
+		return;
+
+	CARD8 xmodifier = 0;
+	if (event.shift())
+		xmodifier |= ShiftMask;
+	if (event.caps_lock())
+		xmodifier |= LockMask;
+	if (event.ctrl())
+		xmodifier |= ControlMask;
+
+	xEvent xevent { .u = {
+		.keyButtonPointer = {
+			.time = static_cast<CARD32>(time(nullptr)),
+			.root = root.windowId,
+			.event = wid,
+			.child = find_child_window(client_info, wid, window.cursor_x, window.cursor_y),
+			.rootX = static_cast<INT16>(window.cursor_x),
+			.rootY = static_cast<INT16>(window.cursor_y),
+			.eventX = static_cast<INT16>(window.cursor_x),
+			.eventY = static_cast<INT16>(window.cursor_y),
+			.state = xmodifier,
+			.sameScreen = xTrue,
+		}
+	}};
+	xevent.u.u.type = event.pressed() ? KeyPress : KeyRelease,
+	xevent.u.u.detail = static_cast<BYTE>(event.key);
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
 }
 
 BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
@@ -1182,37 +1491,13 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					invalidate_window(client_info, wid, 0, 0, window.texture().width(), window.texture().height());
 				});
 				gui_window_ptr->set_mouse_move_event_callback([&client_info, wid](auto event) {
-					update_cursor_position(client_info, wid, event.x, event.y);
+					on_mouse_move_event(client_info, wid, event);
+				});
+				gui_window_ptr->set_mouse_button_event_callback([&client_info, wid](auto event) {
+					on_mouse_button_event(client_info, wid, event);
 				});
 				gui_window_ptr->set_key_event_callback([&client_info, wid](auto event) {
-					if (keymap.map[static_cast<BYTE>(event.key)] == XK_VoidSymbol)
-						return;
-
-					auto& object = *client_info.objects[wid];
-					ASSERT(object.type == Object::Type::Window);
-
-					auto& window = object.object.get<Object::Window>();
-					if (!(window.event_mask & (event.pressed() ? KeyPressMask : KeyReleaseMask)))
-						return;
-
-					xEvent xevent { .u = {
-						.keyButtonPointer = {
-							.time = static_cast<CARD32>(time(nullptr)),
-							.root = root.windowId,
-							.event = wid,
-							.child = None,
-							.rootX = 0,
-							.rootY = 0,
-							.eventX = 0,
-							.eventY = 0,
-							.state = 0,
-							.sameScreen = xTrue,
-						}
-					}};
-					xevent.u.u.type = event.pressed() ? KeyPress : KeyRelease,
-					xevent.u.u.detail = static_cast<BYTE>(event.key);
-					xevent.u.u.sequenceNumber = client_info.sequence;
-					MUST(encode(client_info.output_buffer, xevent));
+					on_key_event(client_info, wid, event);
 				});
 			}
 
@@ -1894,17 +2179,19 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			const auto& window = object.object.get<Object::Window>();
 
+			const auto child_wid = find_child_window(client_info, wid, window.cursor_x, window.cursor_y);
+
 			xQueryPointerReply reply {
 				.type = X_Reply,
 				.sameScreen = xTrue,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 				.root = root.windowId,
-				.child = wid,
+				.child = child_wid,
 				.rootX = static_cast<INT16>(window.cursor_x),
 				.rootY = static_cast<INT16>(window.cursor_y),
-				.winX = static_cast<INT16>(window.cursor_x),
-				.winY = static_cast<INT16>(window.cursor_y),
+				.winX = static_cast<INT16>((child_wid == None) ? 0 : window.cursor_x),
+				.winY = static_cast<INT16>((child_wid == None) ? 0 : window.cursor_y),
 				.mask = 0,
 			};
 			TRY(encode(client_info.output_buffer, reply));

@@ -47,8 +47,23 @@ const xPixmapFormat g_formats[] {
 	}
 };
 
+const xDepth g_depth {
+	.depth = 24,
+	.nVisuals = 1,
+};
+
+const xVisualType g_visual {
+	.visualID = 1,
+	.c_class = TrueColor,
+	.bitsPerRGB = 8,
+	.colormapEntries = 0,
+	.redMask = 0xFF0000,
+	.greenMask = 0x00FF00,
+	.blueMask = 0x0000FF,
+};
+
 const xWindowRoot g_root {
-	.windowId = 1,
+	.windowId = 2,
 	.defaultColormap = 0,
 	.whitePixel = 0xFFFFFF,
 	.blackPixel = 0x000000,
@@ -59,27 +74,14 @@ const xWindowRoot g_root {
 	.mmHeight = 800,
 	.minInstalledMaps = 0,
 	.maxInstalledMaps = 0,
-	.rootVisualID = 0,
+	.rootVisualID = g_visual.visualID,
 	.backingStore = 0,
 	.saveUnders = 0,
 	.rootDepth = 24,
 	.nDepths = 1,
 };
 
-const xDepth g_depth {
-	.depth = 24,
-	.nVisuals = 1,
-};
-
-const xVisualType g_visual {
-	.visualID = 0,
-	.c_class = TrueColor,
-	.bitsPerRGB = 8,
-	.colormapEntries = 0,
-	.redMask = 0xFF0000,
-	.greenMask = 0x00FF00,
-	.blueMask = 0x0000FF,
-};
+BAN::HashMap<CARD32, BAN::UniqPtr<Object>> g_objects;
 
 BAN::HashMap<BAN::String, ATOM> g_atoms_name_to_id;
 BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
@@ -273,22 +275,48 @@ int main()
 
 			dprintln("client {} disconnected", client_fd);
 
-			for (auto& [_, object] : client_info.objects)
+			for (auto id : client_info.objects)
 			{
-				if (object->type != Object::Type::Window)
+				auto it = g_objects.find(id);
+				if (it == g_objects.end())
 					continue;
-				auto& window = object->object.get<Object::Window>();
-				if (!window.window.has<BAN::UniqPtr<LibGUI::Window>>())
-					continue;
-				auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
-				epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, gui_window->server_fd(), nullptr);
-				g_epoll_thingies.remove(gui_window->server_fd());
+
+				auto& object = *it->value;
+				if (object.type == Object::Type::Window)
+				{
+					auto& window = object.object.get<Object::Window>();
+					if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+					{
+						auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+						epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, gui_window->server_fd(), nullptr);
+						g_epoll_thingies.remove(gui_window->server_fd());
+					}
+				}
+
+				g_objects.remove(it);
 			}
 
 			epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
 			close(client_fd);
 			g_epoll_thingies.remove(client_fd);
 		};
+
+	MUST(g_objects.insert(g_root.windowId,
+		MUST(BAN::UniqPtr<Object>::create(Object {
+			.type = Object::Type::Window,
+			.object = Object::Window {
+				.event_mask = 0,
+				.c_class = InputOutput,
+				.window = {},
+			}
+		}))
+	));
+
+	MUST(g_objects.insert(g_visual.visualID,
+		MUST(BAN::UniqPtr<Object>::create(Object {
+			.type = Object::Type::Visual,
+		}))
+	));
 
 	for (;;)
 	{

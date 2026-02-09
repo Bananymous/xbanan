@@ -3,6 +3,7 @@
 #include <BAN/Vector.h>
 #include <BAN/UniqPtr.h>
 #include <BAN/HashMap.h>
+#include <BAN/HashSet.h>
 
 #include <LibGUI/Window.h>
 
@@ -35,6 +36,7 @@ struct Object
 {
 	enum class Type
 	{
+		Visual,
 		Window,
 		Pixmap,
 		GraphicsContext,
@@ -111,8 +113,7 @@ struct Client
 	CARD16 sequence { 0 };
 	BAN::Vector<uint8_t> input_buffer;
 	BAN::Vector<uint8_t> output_buffer;
-
-	BAN::HashMap<CARD32, BAN::UniqPtr<Object>> objects;
+	BAN::HashSet<CARD32> objects;
 };
 
 struct EpollThingy
@@ -131,6 +132,8 @@ extern const xPixmapFormat g_formats[5];
 extern const xWindowRoot g_root;
 extern const xDepth g_depth;
 extern const xVisualType g_visual;
+
+extern BAN::HashMap<CARD32, BAN::UniqPtr<Object>> g_objects;
 
 extern BAN::HashMap<BAN::String, ATOM> g_atoms_name_to_id;
 extern BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;

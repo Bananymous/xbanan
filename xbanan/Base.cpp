@@ -363,38 +363,27 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 
 	client_info.state = Client::State::Connected;
 
-	TRY(client_info.objects.insert(g_root.windowId,
-		TRY(BAN::UniqPtr<Object>::create(Object {
-			.type = Object::Type::Window,
-			.object = Object::Window {
-				.event_mask = 0,
-				.c_class = InputOutput,
-				.window = {},
-			}
-		}))
-	));
-
 	return {};
 }
 
-static bool is_visible(Client& client_info, WINDOW wid)
+static bool is_visible(WINDOW wid)
 {
 	if (wid == g_root.windowId)
 		return true;
 
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
 	if (!window.mapped)
 		return false;
 
-	return is_visible(client_info, window.parent);
+	return is_visible(window.parent);
 }
 
 static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info, WINDOW wid, bool visible)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -417,7 +406,7 @@ static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info
 
 	for (auto child_wid : window.children)
 	{
-		auto& child_object = *client_info.objects[child_wid];
+		auto& child_object = *g_objects[child_wid];
 		ASSERT(child_object.type == Object::Type::Window);
 
 		auto& child_window = object.object.get<Object::Window>();
@@ -430,7 +419,7 @@ static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info
 	return {};
 }
 
-static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
+static void invalidate_window_recursive(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 {
 	ASSERT(wid != g_root.windowId);
 
@@ -439,7 +428,7 @@ static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t
 	if (w <= 0 || h <= 0)
 		return;
 
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -448,7 +437,7 @@ static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t
 
 	for (auto child_wid : window.children)
 	{
-		const auto& child_object = *client_info.objects[child_wid];
+		const auto& child_object = *g_objects[child_wid];
 		ASSERT(child_object.type == Object::Type::Window);
 
 		const auto& child_window = child_object.object.get<Object::Window>();
@@ -462,7 +451,6 @@ static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t
 		const auto child_h = BAN::Math::min<int32_t>(h - child_window.y, child_window.texture().height() - child_y);
 
 		invalidate_window_recursive(
-			client_info,
 			child_wid,
 			child_x, child_y,
 			child_w, child_h
@@ -472,7 +460,7 @@ static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t
 	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
 		return;
 
-	auto& parent_object = *client_info.objects[window.parent];
+	auto& parent_object = *g_objects[window.parent];
 	ASSERT(parent_object.type == Object::Type::Window);
 
 	auto& parent_window = parent_object.object.get<Object::Window>();
@@ -487,13 +475,13 @@ static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t
 	);
 }
 
-static void invalidate_window(Client& client_info, WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
+static void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 {
 	ASSERT(wid != g_root.windowId);
 
 	for (;;)
 	{
-		auto& object = *client_info.objects[wid];
+		auto& object = *g_objects[wid];
 		ASSERT(object.type == Object::Type::Window);
 
 		auto& window = object.object.get<Object::Window>();
@@ -507,9 +495,9 @@ static void invalidate_window(Client& client_info, WINDOW wid, int32_t x, int32_
 		wid = window.parent;
 	}
 
-	invalidate_window_recursive(client_info, wid, x, y, w, h);
+	invalidate_window_recursive(wid, x, y, w, h);
 
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -539,7 +527,7 @@ static void invalidate_window(Client& client_info, WINDOW wid, int32_t x, int32_
 
 static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -551,7 +539,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 
 	window.mapped = true;
 
-	invalidate_window(client_info, wid, 0, 0, texture.width(), texture.height());
+	invalidate_window(wid, 0, 0, texture.width(), texture.height());
 
 	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
 	{
@@ -578,7 +566,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 		TRY(encode(client_info.output_buffer, event));
 	}
 
-	auto& parent_object = *client_info.objects[window.parent];
+	auto& parent_object = *g_objects[window.parent];
 	ASSERT(parent_object.type == Object::Type::Window);
 
 	auto& parent_window = parent_object.object.get<Object::Window>();
@@ -596,7 +584,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 		TRY(encode(client_info.output_buffer, event));
 	}
 
-	if (is_visible(client_info, window.parent))
+	if (is_visible(window.parent))
 		TRY(send_visibility_events_recursively(client_info, wid, true));
 
 	if (window.event_mask & ExposureMask)
@@ -620,7 +608,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 
 static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -637,7 +625,7 @@ static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
 		gui_window->set_attributes(attributes);
 	}
 
-	if (is_visible(client_info, window.parent))
+	if (is_visible(window.parent))
 		TRY(send_visibility_events_recursively(client_info, wid, false));
 
 	if (window.event_mask & StructureNotifyMask)
@@ -654,7 +642,7 @@ static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
 		TRY(encode(client_info.output_buffer, event));
 	}
 
-	auto& parent_object = *client_info.objects[window.parent];
+	auto& parent_object = *g_objects[window.parent];
 	ASSERT(parent_object.type == Object::Type::Window);
 
 	auto& parent_window = parent_object.object.get<Object::Window>();
@@ -679,7 +667,7 @@ static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 {
 	TRY(unmap_window(client_info, wid));
 
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -700,7 +688,7 @@ static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 		TRY(encode(client_info.output_buffer, event));
 	}
 
-	auto& parent_object = *client_info.objects[window.parent];
+	auto& parent_object = *g_objects[window.parent];
 	ASSERT(parent_object.type == Object::Type::Window);
 
 	auto& parent_window = parent_object.object.get<Object::Window>();
@@ -733,13 +721,14 @@ static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 	}
 
 	client_info.objects.remove(wid);
+	g_objects.remove(wid);
 
 	return {};
 }
 
-static WINDOW find_child_window(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+static WINDOW find_child_window(WINDOW wid, int32_t x, int32_t y)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -761,11 +750,11 @@ static WINDOW find_child_window(Client& client_info, WINDOW wid, int32_t x, int3
 
 	for (auto child_wid : window.children)
 	{
-		auto& child_object = *client_info.objects[child_wid];
+		auto& child_object = *g_objects[child_wid];
 		ASSERT(child_object.type == Object::Type::Window);
 
 		auto& child_window = child_object.object.get<Object::Window>();
-		if (auto result = find_child_window(client_info, child_wid, x - child_window.x, y - child_window.y); result != None)
+		if (auto result = find_child_window(child_wid, x - child_window.x, y - child_window.y); result != None)
 			return result;
 	}
 
@@ -774,7 +763,7 @@ static WINDOW find_child_window(Client& client_info, WINDOW wid, int32_t x, int3
 
 static void send_mouse_move_events(Client& client_info, WINDOW wid, WINDOW event_child_wid, int32_t x, int32_t y)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -783,7 +772,7 @@ static void send_mouse_move_events(Client& client_info, WINDOW wid, WINDOW event
 
 	for (auto child_wid : window.children)
 	{
-		auto& child_object = *client_info.objects[child_wid];
+		auto& child_object = *g_objects[child_wid];
 		ASSERT(child_object.type == Object::Type::Window);
 
 		auto& child_window = object.object.get<Object::Window>();
@@ -817,7 +806,7 @@ static void send_mouse_move_events(Client& client_info, WINDOW wid, WINDOW event
 	MUST(encode(client_info.output_buffer, xevent));
 }
 
-static BAN::Vector<WINDOW> get_path_to_child(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
 {
 	BAN::Vector<WINDOW> result;
 
@@ -830,7 +819,7 @@ static BAN::Vector<WINDOW> get_path_to_child(Client& client_info, WINDOW wid, in
 
 	for (;;)
 	{
-		const auto& object = *client_info.objects[wid];
+		const auto& object = *g_objects[wid];
 		ASSERT(object.type == Object::Type::Window);
 
 		const auto& window = object.object.get<Object::Window>();
@@ -842,7 +831,7 @@ static BAN::Vector<WINDOW> get_path_to_child(Client& client_info, WINDOW wid, in
 		const WINDOW old_wid = wid;
 		for (auto child_wid : window.children)
 		{
-			const auto& child_object = *client_info.objects[child_wid];
+			const auto& child_object = *g_objects[child_wid];
 			ASSERT(child_object.type == Object::Type::Window);
 
 			const auto& child_window = child_object.object.get<Object::Window>();
@@ -861,8 +850,8 @@ static BAN::Vector<WINDOW> get_path_to_child(Client& client_info, WINDOW wid, in
 
 static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
 {
-	const auto old_child_path = get_path_to_child(client_info, wid, old_x, old_y);
-	const auto new_child_path = get_path_to_child(client_info, wid, new_x, new_y);
+	const auto old_child_path = get_path_to_child(wid, old_x, old_y);
+	const auto new_child_path = get_path_to_child(wid, new_x, new_y);
 
 	size_t common_ancestors = 0;
 	while (common_ancestors < old_child_path.size() && common_ancestors < new_child_path.size())
@@ -892,9 +881,8 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 			}();
 
 		const auto& wid = old_child_path[old_child_path.size() - i - 1];
-		dwarnln("leave {} {}", wid, detail);
 
-		auto& object = *client_info.objects[wid];
+		auto& object = *g_objects[wid];
 		ASSERT(object.type == Object::Type::Window);
 		auto& window = object.object.get<Object::Window>();
 		if (!(window.event_mask & LeaveWindowMask))
@@ -935,9 +923,8 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 			}();
 
 		const auto& wid = new_child_path[common_ancestors + i];
-		dwarnln("enter {} {}", wid, detail);
 
-		auto& object = *client_info.objects[wid];
+		auto& object = *g_objects[wid];
 		ASSERT(object.type == Object::Type::Window);
 		auto& window = object.object.get<Object::Window>();
 		if (!(window.event_mask & EnterWindowMask))
@@ -969,7 +956,7 @@ static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
 	if (focused)
 		g_focus_window = wid;
 
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -997,17 +984,17 @@ static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
 
 static void on_mouse_move_event(Client& client_info, WINDOW wid, int32_t x, int32_t y)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
 	send_enter_and_leave_events(client_info, wid, window.cursor_x, window.cursor_y, x, y);
-	send_mouse_move_events(client_info, wid, find_child_window(client_info, wid, x, y), x, y);
+	send_mouse_move_events(client_info, wid, find_child_window(wid, x, y), x, y);
 }
 
 static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutton, bool pressed)
 {
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -1018,7 +1005,7 @@ static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutt
 	if (!(window.event_mask & (pressed ? ButtonPressMask : ButtonReleaseMask)))
 		return;
 
-	const auto child_wid = find_child_window(client_info, wid, window.cursor_x, window.cursor_y);
+	const auto child_wid = find_child_window(wid, window.cursor_x, window.cursor_y);
 
 	xEvent xevent { .u = {
 		.keyButtonPointer = {
@@ -1045,7 +1032,7 @@ static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::K
 	if (g_keymap.map[static_cast<BYTE>(event.key)] == XK_VoidSymbol)
 		return;
 
-	auto& object = *client_info.objects[wid];
+	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
@@ -1069,7 +1056,7 @@ static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::K
 			.time = static_cast<CARD32>(time(nullptr)),
 			.root = g_root.windowId,
 			.event = wid,
-			.child = find_child_window(client_info, wid, window.cursor_x, window.cursor_y),
+			.child = find_child_window(wid, window.cursor_x, window.cursor_y),
 			.rootX = static_cast<INT16>(window.cursor_x),
 			.rootY = static_cast<INT16>(window.cursor_y),
 			.eventX = static_cast<INT16>(window.cursor_x),
@@ -1098,8 +1085,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 	const auto get_window =
 		[&client_info, opcode](WINDOW wid) -> BAN::ErrorOr<Object::Window&>
 		{
-			auto it = client_info.objects.find(wid);
-			if (it == client_info.objects.end() || it->value->type != Object::Type::Window)
+			auto it = g_objects.find(wid);
+			if (it == g_objects.end() || it->value->type != Object::Type::Window)
 			{
 				xError error {
 					.type = X_Error,
@@ -1119,8 +1106,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 	const auto get_drawable =
 		[&client_info, opcode](WINDOW drawable) -> BAN::ErrorOr<Object&>
 		{
-			auto it = client_info.objects.find(drawable);
-			if (it == client_info.objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
+			auto it = g_objects.find(drawable);
+			if (it == g_objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
 			{
 				xError error {
 					.type = X_Error,
@@ -1290,13 +1277,14 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				window = BAN::move(gui_window);
 			}
 
-			auto& parent_object = client_info.objects[request.parent];
+			auto& parent_object = g_objects[request.parent];
 			ASSERT(parent_object->type == Object::Type::Window);
 
 			auto& parent_window = parent_object->object.get<Object::Window>();
 			TRY(parent_window.children.push_back(request.wid));
 
-			TRY(client_info.objects.insert(
+			TRY(client_info.objects.insert(request.wid));
+			TRY(g_objects.insert(
 				request.wid,
 				TRY(BAN::UniqPtr<Object>::create(Object {
 					.type = Object::Type::Window,
@@ -1316,7 +1304,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				const WINDOW wid = request.wid;
 				gui_window_ptr->set_close_window_event_callback([]{});
 				gui_window_ptr->set_resize_window_event_callback([&client_info, wid]() {
-					auto& object = *client_info.objects[wid];
+					auto& object = *g_objects[wid];
 					ASSERT(object.type == Object::Type::Window);
 
 					auto& window = object.object.get<Object::Window>();
@@ -1340,7 +1328,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						MUST(encode(client_info.output_buffer, event));
 					}
 
-					auto& parent_object = *client_info.objects[window.parent];
+					auto& parent_object = *g_objects[window.parent];
 					ASSERT(parent_object.type == Object::Type::Window);
 
 					auto& parent_window = parent_object.object.get<Object::Window>();
@@ -1364,7 +1352,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						MUST(encode(client_info.output_buffer, event));
 					}
 
-					invalidate_window(client_info, wid, 0, 0, window.texture().width(), window.texture().height());
+					invalidate_window(wid, 0, 0, window.texture().width(), window.texture().height());
 				});
 				gui_window_ptr->set_window_focus_event_callback([&client_info, wid](auto event) {
 					on_window_focus_event(client_info, wid, event.focused);
@@ -1480,7 +1468,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.backingPixel = 0,
 				.saveUnder = 0,
 				.mapInstalled = 0,
-				.mapState = static_cast<CARD8>(is_visible(client_info, wid) ? 2 : window.mapped),
+				.mapState = static_cast<CARD8>(is_visible(wid) ? 2 : window.mapped),
 				.override = 0,
 				.colormap = 0,
 				.allEventMasks = window.event_mask,
@@ -1630,7 +1618,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			if (!window_changed)
 				break;
 		
-			invalidate_window(client_info, request.window, min_x, min_y, max_x - min_x, max_y + min_y);
+			invalidate_window(request.window, min_x, min_y, max_x - min_x, max_y + min_y);
 
 			if (window.event_mask & StructureNotifyMask)
 			{
@@ -1652,7 +1640,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				TRY(encode(client_info.output_buffer, event));
 			}
 
-			auto& parent_object = *client_info.objects[window.parent];
+			auto& parent_object = *g_objects[window.parent];
 			ASSERT(parent_object.type == Object::Type::Window);
 
 			auto& parent_window = parent_object.object.get<Object::Window>();
@@ -1745,7 +1733,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("QueryTree");
 			dprintln("  window: {}", wid);
 
-			const auto& object = *client_info.objects[wid];
+			const auto& object = *g_objects[wid];
 			ASSERT(object.type == Object::Type::Window);
 
 			const auto& window = object.object.get<Object::Window>();
@@ -1902,7 +1890,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  window:   {}", request.window);
 			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
 
-			auto& object = *client_info.objects[request.window];
+			auto& object = *g_objects[request.window];
 			ASSERT(object.type == Object::Type::Window);
 
 			auto& window = object.object.get<Object::Window>();
@@ -1942,7 +1930,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  longOffset: {}", request.longOffset);
 			dprintln("  longLength: {}", request.longLength);
 
-			auto& object = *client_info.objects[request.window];
+			auto& object = *g_objects[request.window];
 			ASSERT(object.type == Object::Type::Window);
 
 			auto& window = object.object.get<Object::Window>();
@@ -2228,7 +2216,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 				.root = g_root.windowId,
-				.child = find_child_window(client_info, wid, window.cursor_x, window.cursor_y),
+				.child = find_child_window(wid, window.cursor_x, window.cursor_y),
 				.rootX = static_cast<INT16>(window.cursor_x),
 				.rootY = static_cast<INT16>(window.cursor_y),
 				.winX = static_cast<INT16>(window.cursor_x),
@@ -2310,7 +2298,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			BAN::Vector<uint8_t> data;
 			TRY(data.resize(request.width * request.height * 4));
 
-			TRY(client_info.objects.insert(
+			TRY(client_info.objects.insert(request.pid));
+			TRY(g_objects.insert(
 				request.pid,
 				TRY(BAN::UniqPtr<Object>::create(Object {
 					.type = Object::Type::Pixmap,
@@ -2332,11 +2321,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("FreePixmap");
 			dprintln("  pixmap: {}", pid);
 
-			auto it = client_info.objects.find(pid);
-			ASSERT(it != client_info.objects.end());
+			auto it = g_objects.find(pid);
+			ASSERT(it != g_objects.end());
 			ASSERT(it->value->type == Object::Type::Pixmap);
 
-			client_info.objects.remove(it);
+			client_info.objects.remove(pid);
+			g_objects.remove(it);
 
 			break;
 		}
@@ -2373,7 +2363,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}
 			}
 
-			TRY(client_info.objects.insert(request.gc, TRY(BAN::UniqPtr<Object>::create(Object {
+			TRY(client_info.objects.insert(request.gc));
+			TRY(g_objects.insert(request.gc, TRY(BAN::UniqPtr<Object>::create(Object {
 				.type = Object::Type::GraphicsContext,
 				.object = Object::GraphicsContext { 
 					.foreground = foreground,
@@ -2391,7 +2382,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  gc       {}", request.gc);
 			dprintln("  mask     {8h}", request.mask);
 
-			auto& object = *client_info.objects[request.gc];
+			auto& object = *g_objects[request.gc];
 			ASSERT(object.type == Object::Type::GraphicsContext);
 
 			auto& gc = object.object.get<Object::GraphicsContext>();
@@ -2428,6 +2419,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  gc: {}", gc);
 
 			client_info.objects.remove(gc);
+			g_objects.remove(gc);
 
 			break;
 		}
@@ -2443,7 +2435,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  width:     {}", request.width);
 			dprintln("  height:    {}", request.height);
 
-			auto& object = *client_info.objects[request.window];
+			auto& object = *g_objects[request.window];
 			ASSERT(object.type == Object::Type::Window);
 
 			auto& texture = object.object.get<Object::Window>().texture();
@@ -2454,7 +2446,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				request.height = texture.height() - request.y;
 
 			texture.clear_rect(request.x, request.y, request.width, request.height);
-			invalidate_window(client_info, request.window, request.x, request.y, request.width, request.height);
+			invalidate_window(request.window, request.x, request.y, request.width, request.height);
 
 			break;
 		}
@@ -2556,7 +2548,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			}
 
 			if (dst_drawable.type == Object::Type::Window)
-				invalidate_window(client_info, request.dstDrawable, request.dstX, request.dstY, request.width, request.height);
+				invalidate_window(request.dstDrawable, request.dstX, request.dstY, request.width, request.height);
 
 			break;
 		}
@@ -2568,7 +2560,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  drawable: {}", request.drawable);
 			dprintln("  gc:       {}", request.gc);
 
-			auto& gc_object = *client_info.objects[request.gc];
+			auto& gc_object = *g_objects[request.gc];
 			ASSERT(gc_object.type == Object::Type::GraphicsContext);
 
 			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
@@ -2595,42 +2587,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					for (int32_t x = min_x; x < max_x; x++)
 						data_u32[y * w + x] = foreground;
 
-#if 0
-				switch (depth)
-				{
-					case 1:
-					{
-						for (int32_t y = min_y; y < max_y; y++)
-						{
-							for (int32_t x = min_x; x < max_x; x++)
-							{
-								const size_t index = y * w + x;
-								const size_t byte = index / 8;
-								const size_t bit = index % 8;
-								if (foreground)
-									data[byte] |=  (1 << bit);
-								else
-									data[byte] &= ~(1 << bit);
-							}
-						}
-						break;
-					}
-					case 24:
-					case 32:
-					{
-						auto* data_u32 = data.as_span<uint32_t>().data();
-						for (int32_t y = min_y; y < max_y; y++)
-							for (int32_t x = min_x; x < max_x; x++)
-								data_u32[y * w + x] = foreground;
-						break;
-					}
-					default:
-						ASSERT_NOT_REACHED();
-				}
-#endif
-
 				if (drawable.type == Object::Type::Window)
-					invalidate_window(client_info, request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
+					invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
 			}
 
 			break;
@@ -2643,12 +2601,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  drawable: {}", request.drawable);
 			dprintln("  gc:       {}", request.gc);
 
-			auto& gc_object = *client_info.objects[request.gc];
+			auto& gc_object = *g_objects[request.gc];
 			ASSERT(gc_object.type == Object::Type::GraphicsContext);
 
 			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
 
-			auto& object = *client_info.objects[request.drawable];
+			auto& object = *g_objects[request.drawable];
 			ASSERT(object.type == Object::Type::Window);
 
 			auto& texture = object.object.get<Object::Window>().texture();
@@ -2721,7 +2679,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					}
 				}
 
-				invalidate_window(client_info, request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
+				invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
 			}
 
 			break;
@@ -2741,7 +2699,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  height:   {}", request.height);
 #endif
 
-			auto& object = *client_info.objects[request.drawable];
+			auto& object = *g_objects[request.drawable];
 			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
 
 			if (packet.empty())
@@ -2756,12 +2714,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			{
 				case 0:
 				{
-					for (CARD32 y = 0; y < request.height; y++)
+					for (int32_t y = 0; y < request.height; y++)
 					{
 						const auto dst_y = request.dstY + y;
 						if (dst_y < 0 || dst_y >= out_h)
 							continue;
-						for (CARD32 x = 0; x < request.width; x++)
+						for (int32_t x = 0; x < request.width; x++)
 						{
 							const auto dst_x = request.dstX + x;
 							if (dst_x < 0 || dst_x >= out_w)
@@ -2777,12 +2735,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				case 2:
 				{
 					auto* pixels_u32 = packet.as_span<const uint32_t>().data();
-					for (CARD32 y = 0; y < request.height; y++)
+					for (int32_t y = 0; y < request.height; y++)
 					{
 						const auto dst_y = request.dstY + y;
 						if (dst_y < 0 || dst_y >= out_h)
 							continue;
-						for (CARD32 x = 0; x < request.width; x++)
+						for (int32_t x = 0; x < request.width; x++)
 						{
 							const auto dst_x = request.dstX + x;
 							if (dst_x < 0 || dst_x >= out_w)
@@ -2798,7 +2756,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			}
 
 			if (object.type == Object::Type::Window)
-				invalidate_window(client_info, request.drawable, request.dstX, request.dstY, request.width, request.height);
+				invalidate_window(request.drawable, request.dstX, request.dstY, request.width, request.height);
 
 			break;
 		}
@@ -2815,7 +2773,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  height:    {}", request.height);
 			dprintln("  planeMask: {}", request.planeMask);
 
-			auto& object = *client_info.objects[request.drawable];
+			auto& object = *g_objects[request.drawable];
 			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
 
 			// ZPixmap

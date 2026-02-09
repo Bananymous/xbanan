@@ -1807,31 +1807,51 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("GetGeometry");
 			dprintln("  drawable: {}", drawable);
 
-			const auto& object = *client_info.objects[drawable];
-			ASSERT(object.type == Object::Type::Window);
+			auto& object = *client_info.objects[drawable];
 
+			INT16 x, y;
 			CARD16 width, height;
+			CARD8 depth;
 
 			if (drawable == root.windowId)
 			{
 				width = root.pixWidth;
 				height = root.pixHeight;
+				depth = root.rootDepth;
+				x = 0;
+				y = 0;
+			}
+			else if (object.type == Object::Type::Window)
+			{
+				const auto& window = object.object.get<Object::Window>();
+				width = window.texture().width();
+				height = window.texture().height();
+				depth = 32;
+				x = window.x;
+				y = window.y;
+			}
+			else if (object.type == Object::Type::Pixmap)
+			{
+				const auto& pixmap = object.object.get<Object::Pixmap>();
+				width = pixmap.width;
+				height = pixmap.height;
+				depth = pixmap.depth;
+				x = 0;
+				y = 0;
 			}
 			else
 			{
-				const auto& texture = object.object.get<Object::Window>().texture();
-				width = texture.width();
-				height = texture.height();
+				ASSERT_NOT_REACHED();
 			}
 
 			xGetGeometryReply reply {
 				.type = X_Reply,
-				.depth = 32,
+				.depth = depth,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 				.root = root.windowId,
-				.x = 0,
-				.y = 0,
+				.x = x,
+				.y = y,
 				.width = width,
 				.height = height,
 				.borderWidth = 0,

@@ -1,0 +1,3098 @@
+#include "Definitions.h"
+#include "Extensions.h"
+#include "Utils.h"
+
+#include <X11/X.h>
+#include <X11/Xatom.h>
+#include <X11/keysym.h>
+
+#include <time.h>
+#include <sys/epoll.h>
+
+struct Selection
+{
+	CARD32 time;
+	WINDOW owner;
+};
+
+static BAN::HashMap<ATOM, Selection> g_selections;
+
+static WINDOW g_focus_window { None };
+
+static struct Keymap
+{
+	consteval Keymap()
+	{
+		for (auto& sym : map)
+			sym = XK_VoidSymbol;
+
+		using LibInput::Key;
+		map[(size_t)Key::A] = XK_A;
+		map[(size_t)Key::B] = XK_B;
+		map[(size_t)Key::C] = XK_C;
+		map[(size_t)Key::D] = XK_D;
+		map[(size_t)Key::E] = XK_E;
+		map[(size_t)Key::F] = XK_F;
+		map[(size_t)Key::G] = XK_G;
+		map[(size_t)Key::H] = XK_H;
+		map[(size_t)Key::I] = XK_I;
+		map[(size_t)Key::J] = XK_J;
+		map[(size_t)Key::K] = XK_K;
+		map[(size_t)Key::L] = XK_L;
+		map[(size_t)Key::M] = XK_M;
+		map[(size_t)Key::N] = XK_N;
+		map[(size_t)Key::O] = XK_O;
+		map[(size_t)Key::P] = XK_P;
+		map[(size_t)Key::Q] = XK_Q;
+		map[(size_t)Key::R] = XK_R;
+		map[(size_t)Key::S] = XK_S;
+		map[(size_t)Key::T] = XK_T;
+		map[(size_t)Key::U] = XK_U;
+		map[(size_t)Key::V] = XK_V;
+		map[(size_t)Key::W] = XK_W;
+		map[(size_t)Key::X] = XK_X;
+		map[(size_t)Key::Y] = XK_Y;
+		map[(size_t)Key::Z] = XK_Z;
+		map[(size_t)Key::A_Ring] = XK_Aring;
+		map[(size_t)Key::A_Umlaut] = XK_Adiaeresis;
+		map[(size_t)Key::O_Umlaut] = XK_Odiaeresis;
+		map[(size_t)Key::_0] = XK_0;
+		map[(size_t)Key::_1] = XK_1;
+		map[(size_t)Key::_2] = XK_2;
+		map[(size_t)Key::_3] = XK_3;
+		map[(size_t)Key::_4] = XK_4;
+		map[(size_t)Key::_5] = XK_5;
+		map[(size_t)Key::_6] = XK_6;
+		map[(size_t)Key::_7] = XK_7;
+		map[(size_t)Key::_8] = XK_8;
+		map[(size_t)Key::_9] = XK_9;
+		map[(size_t)Key::F1] = XK_F1;
+		map[(size_t)Key::F2] = XK_F2;
+		map[(size_t)Key::F3] = XK_F3;
+		map[(size_t)Key::F4] = XK_F4;
+		map[(size_t)Key::F5] = XK_F5;
+		map[(size_t)Key::F6] = XK_F6;
+		map[(size_t)Key::F7] = XK_F7;
+		map[(size_t)Key::F8] = XK_F8;
+		map[(size_t)Key::F9] = XK_F9;
+		map[(size_t)Key::F10] = XK_F10;
+		map[(size_t)Key::F11] = XK_F11;
+		map[(size_t)Key::F12] = XK_F12;
+		map[(size_t)Key::Insert] = XK_Insert;
+		map[(size_t)Key::PrintScreen] = XK_Print;
+		map[(size_t)Key::Delete] = XK_Delete;
+		map[(size_t)Key::Home] = XK_Home;
+		map[(size_t)Key::End] = XK_End;
+		map[(size_t)Key::PageUp] = XK_Page_Up;
+		map[(size_t)Key::PageDown] = XK_Page_Down;
+		map[(size_t)Key::Enter] = XK_Return;
+		map[(size_t)Key::Space] = XK_space;
+		map[(size_t)Key::ExclamationMark] = XK_exclam;
+		map[(size_t)Key::DoubleQuote] = XK_quotedbl;
+		map[(size_t)Key::Hashtag] = XK_numbersign;
+		map[(size_t)Key::Currency] = XK_currency;
+		map[(size_t)Key::Percent] = XK_percent;
+		map[(size_t)Key::Ampersand] = XK_ampersand;
+		map[(size_t)Key::Slash] = XK_slash;
+		map[(size_t)Key::Section] = XK_section;
+		map[(size_t)Key::Half] = XK_onehalf;
+		map[(size_t)Key::OpenParenthesis] = ')';
+		map[(size_t)Key::CloseParenthesis] = '(';
+		map[(size_t)Key::OpenSquareBracket] = '[';
+		map[(size_t)Key::CloseSquareBracket] = ']';
+		map[(size_t)Key::OpenCurlyBracket] = '{';
+		map[(size_t)Key::CloseCurlyBracket] = '}';
+		map[(size_t)Key::Equals] = '=';
+		map[(size_t)Key::QuestionMark] = '?';
+		map[(size_t)Key::Plus] = '+';
+		map[(size_t)Key::BackSlash] = '\\';
+		map[(size_t)Key::Acute] = XK_acute;
+		map[(size_t)Key::BackTick] = '`';
+		map[(size_t)Key::TwoDots] = XK_diaeresis;
+		map[(size_t)Key::Cedilla] = XK_Ccedilla;
+		map[(size_t)Key::Backspace] = XK_BackSpace;
+		map[(size_t)Key::AtSign] = XK_at;
+		map[(size_t)Key::Pound] = XK_sterling;
+		map[(size_t)Key::Dollar] = XK_dollar;
+		map[(size_t)Key::Euro] = XK_EuroSign;
+		map[(size_t)Key::Escape] = XK_Escape;
+		map[(size_t)Key::Tab] = XK_Tab;
+		map[(size_t)Key::CapsLock] = XK_Caps_Lock;
+		map[(size_t)Key::LeftShift] = XK_Shift_L;
+		map[(size_t)Key::LeftCtrl] = XK_Control_L;
+		map[(size_t)Key::Super] = XK_Super_L;
+		map[(size_t)Key::LeftAlt] = XK_Alt_L;
+		map[(size_t)Key::RightAlt] = XK_Alt_R;
+		map[(size_t)Key::RightCtrl] = XK_Control_R;
+		map[(size_t)Key::RightShift] = XK_Shift_R;
+		map[(size_t)Key::SingleQuote] = '\'';
+		map[(size_t)Key::Asterix] = '*';
+		map[(size_t)Key::Caret] = '^';
+		map[(size_t)Key::Tilde] = '~';
+		map[(size_t)Key::ArrowUp] = XK_Up;
+		map[(size_t)Key::ArrowDown] = XK_Down;
+		map[(size_t)Key::ArrowLeft] = XK_Left;
+		map[(size_t)Key::ArrowRight] = XK_Right;
+		map[(size_t)Key::Comma] = ',';
+		map[(size_t)Key::Semicolon] = ';';
+		map[(size_t)Key::Period] = '.';
+		map[(size_t)Key::Colon] = ':';
+		map[(size_t)Key::Hyphen] = '-';
+		map[(size_t)Key::Underscore] = '_';
+		map[(size_t)Key::NumLock] = XK_Num_Lock;
+		map[(size_t)Key::ScrollLock] = XK_Scroll_Lock;
+		map[(size_t)Key::LessThan] = '<';
+		map[(size_t)Key::GreaterThan] = '>';
+		map[(size_t)Key::Pipe] = '|';
+		map[(size_t)Key::Negation] = XK_notsign;
+		map[(size_t)Key::BrokenBar] = XK_brokenbar;
+		map[(size_t)Key::Numpad0] = XK_KP_0;
+		map[(size_t)Key::Numpad1] = XK_KP_1;
+		map[(size_t)Key::Numpad2] = XK_KP_2;
+		map[(size_t)Key::Numpad3] = XK_KP_3;
+		map[(size_t)Key::Numpad4] = XK_KP_4;
+		map[(size_t)Key::Numpad5] = XK_KP_5;
+		map[(size_t)Key::Numpad6] = XK_KP_6;
+		map[(size_t)Key::Numpad7] = XK_KP_7;
+		map[(size_t)Key::Numpad8] = XK_KP_8;
+		map[(size_t)Key::Numpad9] = XK_KP_9;
+		map[(size_t)Key::NumpadPlus] = XK_KP_Add;
+		map[(size_t)Key::NumpadMinus] = XK_KP_Subtract;
+		map[(size_t)Key::NumpadMultiply] = XK_KP_Multiply;
+		map[(size_t)Key::NumpadDivide] = XK_KP_Divide;
+		map[(size_t)Key::NumpadEnter] = XK_KP_Enter;
+		map[(size_t)Key::NumpadDecimal] = XK_KP_Decimal;
+#if 0
+		map[(size_t)Key::VolumeMute] = XF8_mute;
+		map[(size_t)Key::VolumeUp] = XK_VolumeUp;
+		map[(size_t)Key::VolumeDown] = XK_VolumeDown;
+		map[(size_t)Key::Calculator] = XK_Calculator;
+		map[(size_t)Key::MediaPlayPause] = XK_MediaPlayPause;
+		map[(size_t)Key::MediaStop] = XK_MediaStop;
+		map[(size_t)Key::MediaPrevious] = XK_MediaPrevious;
+		map[(size_t)Key::MediaNext] = XK_MediaNext;
+#endif
+	}
+
+	static constexpr size_t size = static_cast<size_t>(LibInput::Key::Count);
+	KeySym map[size];
+} g_keymap;
+
+static const char* opcode_to_name[] {
+	[0] = "none",
+	[X_CreateWindow] = "X_CreateWindow",
+	[X_ChangeWindowAttributes] = "X_ChangeWindowAttributes",
+	[X_GetWindowAttributes] = "X_GetWindowAttributes",
+	[X_DestroyWindow] = "X_DestroyWindow",
+	[X_DestroySubwindows] = "X_DestroySubwindows",
+	[X_ChangeSaveSet] = "X_ChangeSaveSet",
+	[X_ReparentWindow] = "X_ReparentWindow",
+	[X_MapWindow] = "X_MapWindow",
+	[X_MapSubwindows] = "X_MapSubwindows",
+	[X_UnmapWindow] = "X_UnmapWindow",
+	[X_UnmapSubwindows] = "X_UnmapSubwindows",
+	[X_ConfigureWindow] = "X_ConfigureWindow",
+	[X_CirculateWindow] = "X_CirculateWindow",
+	[X_GetGeometry] = "X_GetGeometry",
+	[X_QueryTree] = "X_QueryTree",
+	[X_InternAtom] = "X_InternAtom",
+	[X_GetAtomName] = "X_GetAtomName",
+	[X_ChangeProperty] = "X_ChangeProperty",
+	[X_DeleteProperty] = "X_DeleteProperty",
+	[X_GetProperty] = "X_GetProperty",
+	[X_ListProperties] = "X_ListProperties",
+	[X_SetSelectionOwner] = "X_SetSelectionOwner",
+	[X_GetSelectionOwner] = "X_GetSelectionOwner",
+	[X_ConvertSelection] = "X_ConvertSelection",
+	[X_SendEvent] = "X_SendEvent",
+	[X_GrabPointer] = "X_GrabPointer",
+	[X_UngrabPointer] = "X_UngrabPointer",
+	[X_GrabButton] = "X_GrabButton",
+	[X_UngrabButton] = "X_UngrabButton",
+	[X_ChangeActivePointerGrab] = "X_ChangeActivePointerGrab",
+	[X_GrabKeyboard] = "X_GrabKeyboard",
+	[X_UngrabKeyboard] = "X_UngrabKeyboard",
+	[X_GrabKey] = "X_GrabKey",
+	[X_UngrabKey] = "X_UngrabKey",
+	[X_AllowEvents] = "X_AllowEvents",
+	[X_GrabServer] = "X_GrabServer",
+	[X_UngrabServer] = "X_UngrabServer",
+	[X_QueryPointer] = "X_QueryPointer",
+	[X_GetMotionEvents] = "X_GetMotionEvents",
+	[X_TranslateCoords] = "X_TranslateCoords",
+	[X_WarpPointer] = "X_WarpPointer",
+	[X_SetInputFocus] = "X_SetInputFocus",
+	[X_GetInputFocus] = "X_GetInputFocus",
+	[X_QueryKeymap] = "X_QueryKeymap",
+	[X_OpenFont] = "X_OpenFont",
+	[X_CloseFont] = "X_CloseFont",
+	[X_QueryFont] = "X_QueryFont",
+	[X_QueryTextExtents] = "X_QueryTextExtents",
+	[X_ListFonts] = "X_ListFonts",
+	[X_ListFontsWithInfo] = "X_ListFontsWithInfo",
+	[X_SetFontPath] = "X_SetFontPath",
+	[X_GetFontPath] = "X_GetFontPath",
+	[X_CreatePixmap] = "X_CreatePixmap",
+	[X_FreePixmap] = "X_FreePixmap",
+	[X_CreateGC] = "X_CreateGC",
+	[X_ChangeGC] = "X_ChangeGC",
+	[X_CopyGC] = "X_CopyGC",
+	[X_SetDashes] = "X_SetDashes",
+	[X_SetClipRectangles] = "X_SetClipRectangles",
+	[X_FreeGC] = "X_FreeGC",
+	[X_ClearArea] = "X_ClearArea",
+	[X_CopyArea] = "X_CopyArea",
+	[X_CopyPlane] = "X_CopyPlane",
+	[X_PolyPoint] = "X_PolyPoint",
+	[X_PolyLine] = "X_PolyLine",
+	[X_PolySegment] = "X_PolySegment",
+	[X_PolyRectangle] = "X_PolyRectangle",
+	[X_PolyArc] = "X_PolyArc",
+	[X_FillPoly] = "X_FillPoly",
+	[X_PolyFillRectangle] = "X_PolyFillRectangle",
+	[X_PolyFillArc] = "X_PolyFillArc",
+	[X_PutImage] = "X_PutImage",
+	[X_GetImage] = "X_GetImage",
+	[X_PolyText8] = "X_PolyText8",
+	[X_PolyText16] = "X_PolyText16",
+	[X_ImageText8] = "X_ImageText8",
+	[X_ImageText16] = "X_ImageText16",
+	[X_CreateColormap] = "X_CreateColormap",
+	[X_FreeColormap] = "X_FreeColormap",
+	[X_CopyColormapAndFree] = "X_CopyColormapAndFree",
+	[X_InstallColormap] = "X_InstallColormap",
+	[X_UninstallColormap] = "X_UninstallColormap",
+	[X_ListInstalledColormaps] = "X_ListInstalledColormaps",
+	[X_AllocColor] = "X_AllocColor",
+	[X_AllocNamedColor] = "X_AllocNamedColor",
+	[X_AllocColorCells] = "X_AllocColorCells",
+	[X_AllocColorPlanes] = "X_AllocColorPlanes",
+	[X_FreeColors] = "X_FreeColors",
+	[X_StoreColors] = "X_StoreColors",
+	[X_StoreNamedColor] = "X_StoreNamedColor",
+	[X_QueryColors] = "X_QueryColors",
+	[X_LookupColor] = "X_LookupColor",
+	[X_CreateCursor] = "X_CreateCursor",
+	[X_CreateGlyphCursor] = "X_CreateGlyphCursor",
+	[X_FreeCursor] = "X_FreeCursor",
+	[X_RecolorCursor] = "X_RecolorCursor",
+	[X_QueryBestSize] = "X_QueryBestSize",
+	[X_QueryExtension] = "X_QueryExtension",
+	[X_ListExtensions] = "X_ListExtensions",
+	[X_ChangeKeyboardMapping] = "X_ChangeKeyboardMapping",
+	[X_GetKeyboardMapping] = "X_GetKeyboardMapping",
+	[X_ChangeKeyboardControl] = "X_ChangeKeyboardControl",
+	[X_GetKeyboardControl] = "X_GetKeyboardControl",
+	[X_Bell] = "X_Bell",
+	[X_ChangePointerControl] = "X_ChangePointerControl",
+	[X_GetPointerControl] = "X_GetPointerControl",
+	[X_SetScreenSaver] = "X_SetScreenSaver",
+	[X_GetScreenSaver] = "X_GetScreenSaver",
+	[X_ChangeHosts] = "X_ChangeHosts",
+	[X_ListHosts] = "X_ListHosts",
+	[X_SetAccessControl] = "X_SetAccessControl",
+	[X_SetCloseDownMode] = "X_SetCloseDownMode",
+	[X_KillClient] = "X_KillClient",
+	[X_RotateProperties] = "X_RotateProperties",
+	[X_ForceScreenSaver] = "X_ForceScreenSaver",
+	[X_SetPointerMapping] = "X_SetPointerMapping",
+	[X_GetPointerMapping] = "X_GetPointerMapping",
+	[X_SetModifierMapping] = "X_SetModifierMapping",
+	[X_GetModifierMapping] = "X_GetModifierMapping",
+	[120] = "none",
+	[121] = "none",
+	[122] = "none",
+	[123] = "none",
+	[124] = "none",
+	[125] = "none",
+	[126] = "none",
+	[X_NoOperation] = "X_NoOperation",
+};
+
+BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClientPrefix& client_prefix)
+{
+	dprintln("Connection Setup");
+	dprintln("  byteOrder:        {2h}", client_prefix.byteOrder);
+	dprintln("  majorVersion:     {}", client_prefix.majorVersion);
+	dprintln("  minorVersion:     {}", client_prefix.minorVersion);
+	dprintln("  nbytesAuthProto:  {}", client_prefix.nbytesAuthProto);
+	dprintln("  nbytesAuthString: {}", client_prefix.nbytesAuthString);
+
+	if (client_prefix.byteOrder != 0x6C)
+	{
+		dwarnln("non little endian request, fuck you");
+		return BAN::Error::from_errno(ENOTSUP);
+	}
+
+	const CARD8 format_count = sizeof(g_formats) / sizeof(*g_formats);
+
+	xConnSetupPrefix setup_prefix {
+		.success = 1,
+		.lengthReason = 0, // wtf is this
+		.majorVersion = client_prefix.majorVersion,
+		.minorVersion = client_prefix.minorVersion,
+		.length = 8 + 2*format_count + (8 + 0 + sz_xWindowRoot + sz_xDepth + sz_xVisualType) / 4,
+	};
+	TRY(encode(client_info.output_buffer, setup_prefix));
+
+	ASSERT((client_info.fd >> 24) == 0);
+
+	xConnSetup setup {
+		.release = 0,
+		.ridBase = static_cast<CARD32>(client_info.fd << 24),
+		.ridMask = 0x00FFFFFF,
+		.motionBufferSize = 0,
+		.nbytesVendor = 8,
+		.maxRequestSize = 0xFFFF,
+		.numRoots = 1,
+		.numFormats = format_count,
+		.imageByteOrder = 0, // LSB
+		.bitmapBitOrder = 0, // LSB
+		.bitmapScanlineUnit = 0,
+		.bitmapScanlinePad = 0,
+		.minKeyCode = 1,
+		.maxKeyCode = g_keymap.size,
+	};
+
+	TRY(encode(client_info.output_buffer, setup));
+	TRY(encode(client_info.output_buffer, "banan!!!"_sv));
+	TRY(encode(client_info.output_buffer, BAN::ConstByteSpan::from(g_formats)));
+	TRY(encode(client_info.output_buffer, g_root));
+	TRY(encode(client_info.output_buffer, g_depth));
+	TRY(encode(client_info.output_buffer, g_visual));
+
+	client_info.state = Client::State::Connected;
+
+	TRY(client_info.objects.insert(g_root.windowId,
+		TRY(BAN::UniqPtr<Object>::create(Object {
+			.type = Object::Type::Window,
+			.object = Object::Window {
+				.event_mask = 0,
+				.c_class = InputOutput,
+				.window = {},
+			}
+		}))
+	));
+
+	return {};
+}
+
+static bool is_visible(Client& client_info, WINDOW wid)
+{
+	if (wid == g_root.windowId)
+		return true;
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (!window.mapped)
+		return false;
+
+	return is_visible(client_info, window.parent);
+}
+
+static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info, WINDOW wid, bool visible)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	if (window.c_class == InputOutput)
+	{
+		if (window.event_mask & VisibilityChangeMask)
+		{
+			xEvent event = { .u = {
+				.visibility = {
+					.window = wid,
+					.state = static_cast<CARD8>(visible ? 0 : 2),
+				}
+			}};
+			event.u.u.type = VisibilityNotify;
+			event.u.u.sequenceNumber = client_info.sequence;
+			TRY(encode(client_info.output_buffer, event));
+		}
+	}
+
+	for (auto child_wid : window.children)
+	{
+		auto& child_object = *client_info.objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+
+		auto& child_window = object.object.get<Object::Window>();
+		if (!child_window.mapped)
+			continue;
+
+		TRY(send_visibility_events_recursively(client_info, child_wid, visible));
+	}
+
+	return {};
+}
+
+static void invalidate_window_recursive(Client& client_info, WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+	ASSERT(wid != g_root.windowId);
+
+	if (x + w <= 0 || y + h <= 0)
+		return;
+	if (w <= 0 || h <= 0)
+		return;
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (!window.mapped)
+		return;
+
+	for (auto child_wid : window.children)
+	{
+		const auto& child_object = *client_info.objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+
+		const auto& child_window = child_object.object.get<Object::Window>();
+		if (!child_window.mapped)
+			continue;
+
+		const auto child_x = x - child_window.x;
+		const auto child_y = y - child_window.y;
+
+		const auto child_w = BAN::Math::min<int32_t>(w - child_window.x, child_window.texture().width() - child_x);
+		const auto child_h = BAN::Math::min<int32_t>(h - child_window.y, child_window.texture().height() - child_y);
+
+		invalidate_window_recursive(
+			client_info,
+			child_wid,
+			child_x, child_y,
+			child_w, child_h
+		);
+	}
+
+	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+		return;
+
+	auto& parent_object = *client_info.objects[window.parent];
+	ASSERT(parent_object.type == Object::Type::Window);
+
+	auto& parent_window = parent_object.object.get<Object::Window>();
+	parent_window.texture().copy_texture(
+		window.texture(),
+		window.x + x,
+		window.y + y,
+		x,
+		y,
+		w,
+		h
+	);
+}
+
+static void invalidate_window(Client& client_info, WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+	ASSERT(wid != g_root.windowId);
+
+	for (;;)
+	{
+		auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+
+		auto& window = object.object.get<Object::Window>();
+		if (!window.mapped)
+			return;
+		if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+			break;
+
+		x += window.x;
+		y += window.y;
+		wid = window.parent;
+	}
+
+	invalidate_window_recursive(client_info, wid, x, y, w, h);
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	ASSERT(window.window.has<BAN::UniqPtr<LibGUI::Window>>());
+
+	auto& texture = window.texture();
+	const auto min_x = BAN::Math::max<int32_t>(x, 0);
+	const auto min_y = BAN::Math::max<int32_t>(y, 0);
+	const auto max_x = BAN::Math::min<int32_t>(x + w, texture.width());
+	const auto max_y = BAN::Math::min<int32_t>(y + h, texture.height());
+
+	uint32_t* pixels = texture.pixels().data();
+	for (auto y = min_y; y < max_y; y++)
+	{
+		for (auto x = min_x; x < max_x; x++)
+		{
+			auto& pixel = pixels[y * texture.width() + x];
+			if (pixel == LibGUI::Texture::color_invisible)
+				pixel = 0x00000000;
+			else
+				pixel |= 0xFF000000;
+		}
+	}
+
+	window.window.get<BAN::UniqPtr<LibGUI::Window>>()->invalidate(min_x, min_y, max_x - min_x, max_y - min_y);
+}
+
+static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (window.mapped)
+		return {};
+
+	auto& texture = window.texture();
+	texture.clear();
+
+	window.mapped = true;
+
+	invalidate_window(client_info, wid, 0, 0, texture.width(), texture.height());
+
+	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+	{
+		auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+		auto attributes = gui_window->get_attributes();
+		attributes.shown = true;
+		gui_window->set_attributes(attributes);
+
+		gui_window->texture().clear();
+		gui_window->invalidate();
+	}
+
+	if (window.event_mask & StructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.mapNotify = {
+				.event = wid,
+				.window = wid,
+				.override = xFalse,
+			}
+		}};
+		event.u.u.type = MapNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	auto& parent_object = *client_info.objects[window.parent];
+	ASSERT(parent_object.type == Object::Type::Window);
+
+	auto& parent_window = parent_object.object.get<Object::Window>();
+	if (parent_window.event_mask & SubstructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.mapNotify = {
+				.event = window.parent,
+				.window = wid,
+				.override = xFalse,
+			}
+		}};
+		event.u.u.type = MapNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	if (is_visible(client_info, window.parent))
+		TRY(send_visibility_events_recursively(client_info, wid, true));
+
+	if (window.event_mask & ExposureMask)
+	{
+		xEvent event = { .u = {
+			.expose = {
+				.window = wid,
+				.x = 0,
+				.y = 0,
+				.width = static_cast<CARD16>(texture.width()),
+				.height = static_cast<CARD16>(texture.height()),
+			}
+		}};
+		event.u.u.type = Expose;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	return {};
+}
+
+static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (!window.mapped)
+		return {};
+
+	window.mapped = false;
+
+	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+	{
+		auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+		auto attributes = gui_window->get_attributes();
+		attributes.shown = false;
+		gui_window->set_attributes(attributes);
+	}
+
+	if (is_visible(client_info, window.parent))
+		TRY(send_visibility_events_recursively(client_info, wid, false));
+
+	if (window.event_mask & StructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.unmapNotify = {
+				.event = wid,
+				.window = wid,
+				.fromConfigure = xFalse,
+			}
+		}};
+		event.u.u.type = UnmapNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	auto& parent_object = *client_info.objects[window.parent];
+	ASSERT(parent_object.type == Object::Type::Window);
+
+	auto& parent_window = parent_object.object.get<Object::Window>();
+	if (parent_window.event_mask & SubstructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.unmapNotify = {
+				.event = window.parent,
+				.window = wid,
+				.fromConfigure = xFalse,
+			}
+		}};
+		event.u.u.type = UnmapNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	return {};
+}
+
+static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
+{
+	TRY(unmap_window(client_info, wid));
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	for (auto child_wid : window.children)
+		TRY(destroy_window(client_info, child_wid));
+
+	if (window.event_mask & StructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.destroyNotify = {
+				.event = wid,
+				.window = wid,
+			}
+		}};
+		event.u.u.type = DestroyNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	auto& parent_object = *client_info.objects[window.parent];
+	ASSERT(parent_object.type == Object::Type::Window);
+
+	auto& parent_window = parent_object.object.get<Object::Window>();
+	if (parent_window.event_mask & SubstructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.destroyNotify = {
+				.event = window.parent,
+				.window = wid,
+			}
+		}};
+		event.u.u.type = DestroyNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		TRY(encode(client_info.output_buffer, event));
+	}
+
+	for (size_t i = 0; i < parent_window.children.size(); i++)
+	{
+		if (parent_window.children[i] != wid)
+			continue;
+		parent_window.children.remove(i);
+		break;
+	}
+
+	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+	{
+		const auto server_fd = window.window.get<BAN::UniqPtr<LibGUI::Window>>()->server_fd();
+		epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, server_fd, nullptr);
+		g_epoll_thingies.remove(server_fd);
+	}
+
+	client_info.objects.remove(wid);
+
+	return {};
+}
+
+static WINDOW find_child_window(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	uint32_t width, height;
+	if (wid == g_root.windowId)
+	{
+		width = g_root.pixWidth;
+		height = g_root.pixHeight;
+	}
+	else
+	{
+		auto& texture = window.texture();
+		width = texture.width();
+		height = texture.height();
+	}
+	if (x < 0 || y < 0 || x >= width || y >= height)
+		return None;
+
+	for (auto child_wid : window.children)
+	{
+		auto& child_object = *client_info.objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+
+		auto& child_window = child_object.object.get<Object::Window>();
+		if (auto result = find_child_window(client_info, child_wid, x - child_window.x, y - child_window.y); result != None)
+			return result;
+	}
+
+	return wid;
+}
+
+static void send_mouse_move_events(Client& client_info, WINDOW wid, WINDOW event_child_wid, int32_t x, int32_t y)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	window.cursor_x = x;
+	window.cursor_y = y;
+
+	for (auto child_wid : window.children)
+	{
+		auto& child_object = *client_info.objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+
+		auto& child_window = object.object.get<Object::Window>();
+		send_mouse_move_events(client_info, child_wid, event_child_wid, x - child_window.x, y - child_window.y);
+	}
+
+	auto& texture = window.texture();
+	if (x < 0 || y < 0 || x >= texture.width() || y >= texture.height())
+		return;
+
+	if (!(window.event_mask & PointerMotionMask))
+		return;
+
+	xEvent xevent { .u = {
+		.keyButtonPointer = {
+			.time = static_cast<CARD32>(time(nullptr)),
+			.root = g_root.windowId,
+			.event = wid,
+			.child = event_child_wid,
+			.rootX = static_cast<INT16>(x),
+			.rootY = static_cast<INT16>(y),
+			.eventX = static_cast<INT16>(x),
+			.eventY = static_cast<INT16>(y),
+			.state = 0,
+			.sameScreen = xTrue,
+		}
+	}};
+	xevent.u.u.type = MotionNotify,
+	xevent.u.u.detail = NotifyNormal;
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
+}
+
+static BAN::Vector<WINDOW> get_path_to_child(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+{
+	BAN::Vector<WINDOW> result;
+
+	const auto window_contains =
+		[](const Object::Window& window, int32_t x, int32_t y) -> bool
+		{
+			const auto& texture = window.texture();
+			return x >= 0 && y >= 0 && x < texture.width() && y < texture.height();
+		};
+
+	for (;;)
+	{
+		const auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+
+		const auto& window = object.object.get<Object::Window>();
+		if (!window_contains(window, x, y))
+			break;
+		
+		MUST(result.push_back(wid));
+
+		const WINDOW old_wid = wid;
+		for (auto child_wid : window.children)
+		{
+			const auto& child_object = *client_info.objects[child_wid];
+			ASSERT(child_object.type == Object::Type::Window);
+
+			const auto& child_window = child_object.object.get<Object::Window>();
+			if (!window_contains(child_window, x - child_window.x, y - child_window.y))
+				continue;
+			wid = child_wid;
+			break;
+		}
+
+		if (old_wid == wid)
+			break;
+	}
+
+	return result;
+}
+
+static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
+{
+	const auto old_child_path = get_path_to_child(client_info, wid, old_x, old_y);
+	const auto new_child_path = get_path_to_child(client_info, wid, new_x, new_y);
+
+	size_t common_ancestors = 0;
+	while (common_ancestors < old_child_path.size() && common_ancestors < new_child_path.size())
+	{
+		if (old_child_path[common_ancestors] != new_child_path[common_ancestors])
+			break;
+		common_ancestors++;
+	}
+
+	if (old_child_path.size() == common_ancestors && new_child_path.size() == common_ancestors)
+		return;
+
+	const bool linear = (common_ancestors == old_child_path.size() || common_ancestors == new_child_path.size());
+
+	for (size_t i = 0; i < old_child_path.size() - common_ancestors; i++)
+	{
+		const bool first = (i == 0);
+		const BYTE detail =
+			[&]() -> BYTE {
+				if (!linear)
+					return first ? NotifyNonlinear : NotifyNonlinearVirtual;
+				if (!first)
+					return NotifyVirtual;
+				if (old_child_path.size() > new_child_path.size())
+					return NotifyAncestor;
+				return NotifyInferior;
+			}();
+
+		const auto& wid = old_child_path[old_child_path.size() - i - 1];
+		dwarnln("leave {} {}", wid, detail);
+
+		auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+		auto& window = object.object.get<Object::Window>();
+		if (!(window.event_mask & LeaveWindowMask))
+			continue;
+
+		xEvent xevent { .u = {
+			.enterLeave = {
+				.time = static_cast<CARD32>(time(nullptr)),
+				.root = g_root.windowId,
+				.event = wid,
+				.child = first ? static_cast<WINDOW>(None) : old_child_path.back(),
+				.rootX = static_cast<INT16>(old_x),
+				.rootY = static_cast<INT16>(old_x),
+				.eventX = static_cast<INT16>(old_x),
+				.eventY = static_cast<INT16>(old_x),
+				.state = 0,
+				.mode = NotifyNormal,
+			}
+		}};
+		xevent.u.u.type = LeaveNotify,
+		xevent.u.u.detail = detail;
+		xevent.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, xevent));
+	}
+
+	for (size_t i = 0; i < new_child_path.size() - common_ancestors; i++)
+	{
+		const bool last = (i == new_child_path.size() - common_ancestors - 1);
+		const BYTE detail =
+			[&]() -> BYTE {
+				if (!linear)
+					return last ? NotifyNonlinear : NotifyNonlinearVirtual;
+				if (!last)
+					return NotifyVirtual;
+				if (old_child_path.size() > new_child_path.size())
+					return NotifyInferior;
+				return NotifyAncestor;
+			}();
+
+		const auto& wid = new_child_path[common_ancestors + i];
+		dwarnln("enter {} {}", wid, detail);
+
+		auto& object = *client_info.objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+		auto& window = object.object.get<Object::Window>();
+		if (!(window.event_mask & EnterWindowMask))
+			continue;
+
+		xEvent xevent { .u = {
+			.enterLeave = {
+				.time = static_cast<CARD32>(time(nullptr)),
+				.root = g_root.windowId,
+				.event = wid,
+				.child = last ? static_cast<WINDOW>(None) : new_child_path.back(),
+				.rootX = static_cast<INT16>(old_x),
+				.rootY = static_cast<INT16>(old_x),
+				.eventX = static_cast<INT16>(old_x),
+				.eventY = static_cast<INT16>(old_x),
+				.state = 0,
+				.mode = NotifyNormal,
+			}
+		}};
+		xevent.u.u.type = EnterNotify,
+		xevent.u.u.detail = detail;
+		xevent.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, xevent));
+	}
+}
+
+static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
+{
+	if (focused)
+		g_focus_window = wid;
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (window.focused == focused)
+		return;
+
+	window.focused = focused;
+
+	if (!(window.event_mask & FocusChangeMask))
+		return;
+
+	// FIXME: handle childs
+
+	xEvent xevent { .u = {
+		.focus = {
+			.window = wid,
+			.mode = NotifyNormal,
+		}
+	}};
+	xevent.u.u.type = focused ? FocusIn : FocusOut,
+	xevent.u.u.detail = NotifyNonlinear;
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
+}
+
+static void on_mouse_move_event(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	send_enter_and_leave_events(client_info, wid, window.cursor_x, window.cursor_y, x, y);
+	send_mouse_move_events(client_info, wid, find_child_window(client_info, wid, x, y), x, y);
+}
+
+static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutton, bool pressed)
+{
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	for (auto child_wid : window.children)
+		on_mouse_button_event(client_info, child_wid, xbutton, pressed);
+
+	if (!(window.event_mask & (pressed ? ButtonPressMask : ButtonReleaseMask)))
+		return;
+
+	const auto child_wid = find_child_window(client_info, wid, window.cursor_x, window.cursor_y);
+
+	xEvent xevent { .u = {
+		.keyButtonPointer = {
+			.time = static_cast<CARD32>(time(nullptr)),
+			.root = g_root.windowId,
+			.event = wid,
+			.child = child_wid,
+			.rootX = static_cast<INT16>(window.cursor_x),
+			.rootY = static_cast<INT16>(window.cursor_y),
+			.eventX = static_cast<INT16>(child_wid == None ? 0 : window.cursor_x),
+			.eventY = static_cast<INT16>(child_wid == None ? 0 : window.cursor_y),
+			.state = 0,
+			.sameScreen = xTrue,
+		}
+	}};
+	xevent.u.u.type = pressed ? ButtonPress : ButtonRelease,
+	xevent.u.u.detail = xbutton;
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
+}
+
+static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t event)
+{
+	if (g_keymap.map[static_cast<BYTE>(event.key)] == XK_VoidSymbol)
+		return;
+
+	auto& object = *client_info.objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+
+	for (auto child_wid : window.children)
+		on_key_event(client_info, child_wid, event);
+
+	if (!(window.event_mask & (event.pressed() ? KeyPressMask : KeyReleaseMask)))
+		return;
+
+	CARD8 xmodifier = 0;
+	if (event.shift())
+		xmodifier |= ShiftMask;
+	if (event.caps_lock())
+		xmodifier |= LockMask;
+	if (event.ctrl())
+		xmodifier |= ControlMask;
+
+	xEvent xevent { .u = {
+		.keyButtonPointer = {
+			.time = static_cast<CARD32>(time(nullptr)),
+			.root = g_root.windowId,
+			.event = wid,
+			.child = find_child_window(client_info, wid, window.cursor_x, window.cursor_y),
+			.rootX = static_cast<INT16>(window.cursor_x),
+			.rootY = static_cast<INT16>(window.cursor_y),
+			.eventX = static_cast<INT16>(window.cursor_x),
+			.eventY = static_cast<INT16>(window.cursor_y),
+			.state = xmodifier,
+			.sameScreen = xTrue,
+		}
+	}};
+	xevent.u.u.type = event.pressed() ? KeyPress : KeyRelease,
+	xevent.u.u.detail = static_cast<BYTE>(event.key);
+	xevent.u.u.sequenceNumber = client_info.sequence;
+	MUST(encode(client_info.output_buffer, xevent));
+}
+
+BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
+{
+	struct DrawableInfo
+	{
+		BAN::ByteSpan data;
+		CARD32 w, h;
+		CARD8 depth;
+	};
+
+	const uint8_t opcode = packet[0];
+
+	const auto get_window =
+		[&client_info, opcode](WINDOW wid) -> BAN::ErrorOr<Object::Window&>
+		{
+			auto it = client_info.objects.find(wid);
+			if (it == client_info.objects.end() || it->value->type != Object::Type::Window)
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = BadWindow,
+					.sequenceNumber = client_info.sequence,
+					.resourceID = wid,
+					.minorCode = 0,
+					.majorCode = opcode,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				return BAN::Error::from_errno(ENOENT);
+			}
+
+			return it->value->object.get<Object::Window>();
+		};
+
+	const auto get_drawable =
+		[&client_info, opcode](WINDOW drawable) -> BAN::ErrorOr<Object&>
+		{
+			auto it = client_info.objects.find(drawable);
+			if (it == client_info.objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = BadDrawable,
+					.sequenceNumber = client_info.sequence,
+					.resourceID = drawable,
+					.minorCode = 0,
+					.majorCode = opcode,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				return BAN::Error::from_errno(ENOENT);
+			}
+
+			return *it->value;
+		};
+
+	const auto validate_atom =
+		[&client_info, opcode](ATOM atom) -> BAN::ErrorOr<void>
+		{
+			if (g_atoms_id_to_name.contains(atom))
+				return {};
+
+			xError error {
+				.type = X_Error,
+				.errorCode = BadAtom,
+				.sequenceNumber = client_info.sequence,
+				.resourceID = atom,
+				.minorCode = 0,
+				.majorCode = opcode,
+			};
+			TRY(encode(client_info.output_buffer, error));
+			return BAN::Error::from_errno(ENOENT);
+		};
+
+	const auto get_atom_name_safe =
+		[](ATOM atom) -> BAN::StringView
+		{
+			if (atom == None)
+				return "None"_sv;
+			auto it = g_atoms_id_to_name.find(atom);
+			if (it == g_atoms_id_to_name.end())
+				return "<INVALID ATOM>";
+			return it->value.sv();
+		};
+
+	const auto get_drawable_info =
+		[](Object& object) -> DrawableInfo
+		{
+			DrawableInfo info;
+
+			switch (object.type)
+			{
+				case Object::Type::Window:
+				{
+					auto& texture = object.object.get<Object::Window>().texture();
+
+					info.data = { reinterpret_cast<uint8_t*>(texture.pixels().data()), texture.pixels().size() * 4 };
+					info.w = texture.width();
+					info.h = texture.height();
+					info.depth = 32;
+
+					break;
+				}
+				case Object::Type::Pixmap:
+				{
+					auto& pixmap = object.object.get<Object::Pixmap>();
+
+					info.data = pixmap.data.span();
+					info.w = pixmap.width;
+					info.h = pixmap.height;
+					info.depth = pixmap.depth;
+
+					break;
+				}
+				default:
+					ASSERT_NOT_REACHED();
+			}
+
+			return info;
+		};
+
+	client_info.sequence++;
+
+	if (opcode >= 128)
+	{
+		const auto& extension = g_extensions[opcode - 128];
+		if (extension.handler != nullptr)
+			return extension.handler(client_info, packet);
+		dwarnln("invalid opcode {}", opcode);
+		return BAN::Error::from_errno(EINVAL);
+	}
+
+	switch (opcode)
+	{
+		case X_CreateWindow:
+		{
+			auto request = decode<xCreateWindowReq>(packet).value();
+
+			dprintln("CreateWindow");
+			dprintln("  depth:   {}", request.depth);
+			dprintln("  wid:     {}", request.wid);
+			dprintln("  parent:  {}", request.parent);
+			dprintln("  x:       {}", request.x);
+			dprintln("  y:       {}", request.y);
+			dprintln("  width:   {}", request.width);
+			dprintln("  height:  {}", request.height);
+			dprintln("  border:  {}", request.borderWidth);
+			dprintln("  c_class: {}", request.c_class);
+			dprintln("  visual:  {}", request.visual);
+			dprintln("  mask:    {8h}", request.mask);
+
+			uint32_t event_mask { 0 };
+			uint32_t background { 0xFF00FF };
+
+			for (size_t i = 0; i < 32; i++)
+			{
+				if (!((request.mask >> i) & 1))
+					continue;
+				const uint32_t value = decode<uint32_t>(packet).value();
+
+				switch (i)
+				{
+					case 0:
+						if (value == None || value == ParentRelative)
+							background = LibGUI::Texture::color_invisible;
+						else
+							dprintln("    {8h}: {8h}", 1 << i, value);
+						break;
+					case 1:
+						background = value;
+						break;
+					case 11:
+						event_mask = value;
+						derrorln("    events: {8h}", event_mask);
+						break;
+					default:
+						dprintln("    {8h}: {8h}", 1 << i, value);
+						break;
+				}
+			}
+
+			decltype(Object::Window::window) window;
+
+			LibGUI::Window* gui_window_ptr = nullptr;
+
+			if (request.parent != g_root.windowId)
+				window = TRY(LibGUI::Texture::create(request.width, request.height, background));
+			else
+			{
+				auto attributes = LibGUI::Window::default_attributes;
+				attributes.shown = false;
+				attributes.title_bar = false;
+				attributes.alpha_channel = true;
+
+				auto gui_window = TRY(LibGUI::Window::create(request.width, request.height, "window?"_sv, attributes));
+				gui_window->texture().set_bg_color(background);
+				gui_window_ptr = gui_window.ptr();
+
+				TRY(g_epoll_thingies.insert(gui_window->server_fd(), {
+					.type = EpollThingy::Type::Window,
+					.value = gui_window.ptr(),
+				}));
+
+				epoll_event event { .events = EPOLLIN, .data = { .fd = gui_window->server_fd() } };
+				ASSERT(epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, gui_window->server_fd(), &event) == 0);
+
+				window = BAN::move(gui_window);
+			}
+
+			auto& parent_object = client_info.objects[request.parent];
+			ASSERT(parent_object->type == Object::Type::Window);
+
+			auto& parent_window = parent_object->object.get<Object::Window>();
+			TRY(parent_window.children.push_back(request.wid));
+
+			TRY(client_info.objects.insert(
+				request.wid,
+				TRY(BAN::UniqPtr<Object>::create(Object {
+					.type = Object::Type::Window,
+					.object = Object::Window {
+						.x = request.x,
+						.y = request.y,
+						.event_mask = event_mask,
+						.parent = request.parent,
+						.c_class = request.c_class == CopyFromParent ? parent_window.c_class : request.c_class,
+						.window = BAN::move(window),
+					},
+				}))
+			));
+
+			if (gui_window_ptr)
+			{
+				const WINDOW wid = request.wid;
+				gui_window_ptr->set_close_window_event_callback([]{});
+				gui_window_ptr->set_resize_window_event_callback([&client_info, wid]() {
+					auto& object = *client_info.objects[wid];
+					ASSERT(object.type == Object::Type::Window);
+
+					auto& window = object.object.get<Object::Window>();
+					if (window.event_mask & StructureNotifyMask)
+					{
+						xEvent event = { .u = {
+							.configureNotify = {
+								.event = wid,
+								.window = wid,
+								.aboveSibling = xFalse,
+								.x = static_cast<INT16>(window.x),
+								.y = static_cast<INT16>(window.y),
+								.width = static_cast<CARD16>(window.texture().width()),
+								.height = static_cast<CARD16>(window.texture().height()),
+								.borderWidth = 0,
+								.override = xFalse,
+							}
+						}};
+						event.u.u.type = ConfigureNotify;
+						event.u.u.sequenceNumber = client_info.sequence;
+						MUST(encode(client_info.output_buffer, event));
+					}
+
+					auto& parent_object = *client_info.objects[window.parent];
+					ASSERT(parent_object.type == Object::Type::Window);
+
+					auto& parent_window = parent_object.object.get<Object::Window>();
+					if (parent_window.event_mask & SubstructureNotifyMask)
+					{
+						xEvent event = { .u = {
+							.configureNotify = {
+								.event = window.parent,
+								.window = wid,
+								.aboveSibling = xFalse,
+								.x = static_cast<INT16>(window.x),
+								.y = static_cast<INT16>(window.y),
+								.width = static_cast<CARD16>(window.texture().width()),
+								.height = static_cast<CARD16>(window.texture().height()),
+								.borderWidth = 0,
+								.override = xFalse,
+							}
+						}};
+						event.u.u.type = ConfigureNotify;
+						event.u.u.sequenceNumber = client_info.sequence;
+						MUST(encode(client_info.output_buffer, event));
+					}
+
+					invalidate_window(client_info, wid, 0, 0, window.texture().width(), window.texture().height());
+				});
+				gui_window_ptr->set_window_focus_event_callback([&client_info, wid](auto event) {
+					on_window_focus_event(client_info, wid, event.focused);
+				});
+				gui_window_ptr->set_mouse_move_event_callback([&client_info, wid](auto event) {
+					on_mouse_move_event(client_info, wid, event.x, event.y);
+				});
+				gui_window_ptr->set_mouse_button_event_callback([&client_info, wid](auto event) {
+					uint8_t xbutton = 0;
+					switch (event.button)
+					{
+						case LibInput::MouseButton::Left:   xbutton = 1; break;
+						case LibInput::MouseButton::Middle: xbutton = 2; break;
+						case LibInput::MouseButton::Right:  xbutton = 3; break;
+						case LibInput::MouseButton::Extra1: xbutton = 8; break;
+						case LibInput::MouseButton::Extra2: xbutton = 9; break;
+					}
+					if (xbutton)
+						on_mouse_button_event(client_info, wid, xbutton, event.pressed);
+				});
+				gui_window_ptr->set_mouse_scroll_event_callback([&client_info, wid](auto event) {
+					on_mouse_button_event(client_info, wid, event.scroll > 0 ? 4 : 5, true);
+					on_mouse_button_event(client_info, wid, event.scroll > 0 ? 4 : 5, false);
+				});
+				gui_window_ptr->set_key_event_callback([&client_info, wid](auto event) {
+					on_key_event(client_info, wid, event);
+				});
+			}
+
+			if (parent_window.event_mask & SubstructureNotifyMask)
+			{
+				xEvent event = { .u = {
+					.createNotify = {
+						.parent = request.parent,
+						.window = request.wid,
+						.x = request.x,
+						.y = request.y,
+						.width = request.width,
+						.height = request.height,
+						.borderWidth = request.borderWidth,
+						.override = false,
+					}
+				}};
+				event.u.u.type = CreateNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			break;
+		}
+		case X_ChangeWindowAttributes:
+		{
+			auto request = decode<xChangeWindowAttributesReq>(packet).value();
+
+			dprintln("ChangeWindowAttributes");
+			dprintln(" window:    {}", request.window);
+			dprintln(" valueMask: {8h}", request.valueMask);
+
+			auto& window = TRY_REF(get_window(request.window));
+
+			BAN::Optional<uint32_t> background;
+			for (size_t i = 0; i < 32; i++)
+			{
+				if (!((request.valueMask >> i) & 1))
+					continue;
+				const uint32_t value = decode<uint32_t>(packet).value();
+
+				switch (i)
+				{
+					case 0:
+						if (value == None || value == ParentRelative)
+							background = LibGUI::Texture::color_invisible;
+						else
+							dprintln("    {8h}: {8h}", 1 << i, value);
+						break;
+					case 1:
+						background = value;
+						break;
+					case 11:
+						window.event_mask = value;
+						derrorln("    events: {8h}", window.event_mask);
+						break;
+					default:
+						dprintln("    {8h}: {8h}", 1 << i, value);
+						break;
+				}
+			}
+
+			if (background.has_value())
+				window.texture().set_bg_color(background.value());
+
+			break;
+		}
+		case X_GetWindowAttributes:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("GetWindowAttributes");
+			dprintln("  window: {}", wid);
+
+			const auto& window = TRY_REF(get_window(wid));
+
+			xGetWindowAttributesReply reply {
+				.type = X_Reply,
+				.backingStore = 0,
+				.sequenceNumber = client_info.sequence,
+				.length = 3,
+				.visualID = g_visual.visualID,
+				.c_class = window.c_class,
+				.bitGravity = 0,
+				.winGravity = 0,
+				.backingBitPlanes = 0,
+				.backingPixel = 0,
+				.saveUnder = 0,
+				.mapInstalled = 0,
+				.mapState = static_cast<CARD8>(is_visible(client_info, wid) ? 2 : window.mapped),
+				.override = 0,
+				.colormap = 0,
+				.allEventMasks = window.event_mask,
+				.yourEventMask = window.event_mask,
+				.doNotPropagateMask = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_DestroyWindow:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("DestroyWinow");
+			dprintln("  window: {}", wid);
+
+			TRY(destroy_window(client_info, wid));
+
+			break;
+		}
+		case X_MapWindow:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("MapWindow");
+			dprintln("  window: {}", wid);
+
+			(void)TRY_REF(get_window(wid));
+			TRY(map_window(client_info, wid));
+
+			break;
+		}
+		case X_MapSubwindows:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("MapSubwindows");
+			dprintln("  window: {}", wid);
+
+			const auto& window = TRY_REF(get_window(wid));
+			for (auto child_wid : window.children)
+				TRY(map_window(client_info, child_wid));
+
+			break;
+		}
+		case X_UnmapWindow:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("UnmapWindow");
+			dprintln("  window: {}", wid);
+
+			(void)TRY_REF(get_window(wid));
+			TRY(unmap_window(client_info, wid));
+
+			break;
+		}
+		case X_UnmapSubwindows:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("UnmapSubwindows");
+			dprintln("  window: {}", wid);
+
+			const auto& window = TRY_REF(get_window(wid));
+			for (auto child_wid : window.children)
+				TRY(unmap_window(client_info, child_wid));
+
+			break;
+		}
+		case X_ConfigureWindow:
+		{
+			auto request = decode<xConfigureWindowReq>(packet).value();
+
+			dprintln("ConfigureWindow");
+			dprintln("  window: {}", request.window);
+
+			auto& window = TRY_REF(get_window(request.window));
+			auto& texture = window.texture();
+
+			int32_t new_x = window.x;
+			int32_t new_y = window.y;
+			uint32_t new_width = texture.width();
+			uint32_t new_height = texture.height();
+
+			dprintln("  mask:");
+			for (size_t i = 0; i < 7; i++)
+			{
+				if (!(request.mask & (1 << i)))
+					continue;
+				uint16_t value = decode<uint16_t>(packet).value();
+				decode<int16_t>(packet).value();
+
+				switch (i)
+				{
+					case 0:
+						new_x = value;
+						break;
+					case 1:
+						new_y = value;
+						break;
+					case 2:
+						new_width = value;
+						break;
+					case 3:
+						new_height = value;
+						break;
+					case 11:
+						window.event_mask = value;
+						derrorln("    events: {8h}", window.event_mask);
+						break;
+					default:
+						dprintln("    {4h}: {4h}", 1 << i, value);
+						break;
+				}
+			}
+
+			bool window_changed = false;
+
+			const int32_t min_x = BAN::Math::min(window.x, new_x);
+			const int32_t min_y = BAN::Math::min(window.y, new_y);
+			const int32_t max_x = BAN::Math::max(window.x + texture.width(), new_x + new_width);
+			const int32_t max_y = BAN::Math::max(window.y + texture.height(), new_y + new_height);
+
+			if (new_x != window.x || new_y != window.y)
+			{
+				window.x = new_x;
+				window.y = new_y;
+				window_changed = true;
+			}
+
+			if (new_width != texture.width() || new_height != texture.height())
+			{
+				if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+				{
+					window.window.get<BAN::UniqPtr<LibGUI::Window>>()->request_resize(new_width, new_height);
+					window_changed = false;
+				}
+				else
+				{
+					TRY(window.window.get<LibGUI::Texture>().resize(new_width, new_height));
+					window_changed = true;
+				}
+			}
+
+			if (!window_changed)
+				break;
+		
+			invalidate_window(client_info, request.window, min_x, min_y, max_x - min_x, max_y + min_y);
+
+			if (window.event_mask & StructureNotifyMask)
+			{
+				xEvent event = { .u = {
+					.configureNotify = {
+						.event = request.window,
+						.window = request.window,
+						.aboveSibling = xFalse,
+						.x = static_cast<INT16>(window.x),
+						.y = static_cast<INT16>(window.y),
+						.width = static_cast<CARD16>(texture.width()),
+						.height = static_cast<CARD16>(texture.height()),
+						.borderWidth = 0,
+						.override = xFalse,
+					}
+				}};
+				event.u.u.type = ConfigureNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			auto& parent_object = *client_info.objects[window.parent];
+			ASSERT(parent_object.type == Object::Type::Window);
+
+			auto& parent_window = parent_object.object.get<Object::Window>();
+			if (parent_window.event_mask & SubstructureNotifyMask)
+			{
+				xEvent event = { .u = {
+					.configureNotify = {
+						.event = window.parent,
+						.window = request.window,
+						.aboveSibling = xFalse,
+						.x = static_cast<INT16>(window.x),
+						.y = static_cast<INT16>(window.y),
+						.width = static_cast<CARD16>(texture.width()),
+						.height = static_cast<CARD16>(texture.height()),
+						.borderWidth = 0,
+						.override = xFalse,
+					}
+				}};
+				event.u.u.type = ConfigureNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			break;
+		}
+		case X_GetGeometry:
+		{
+			const CARD32 drawable_id = packet.as_span<const uint32_t>()[1];
+
+			dprintln("GetGeometry");
+			dprintln("  drawable: {}", drawable_id);
+
+			const auto& drawable = TRY_REF(get_drawable(drawable_id));
+
+			INT16 x, y;
+			CARD16 width, height;
+			CARD8 depth;
+
+			if (drawable_id == g_root.windowId)
+			{
+				width = g_root.pixWidth;
+				height = g_root.pixHeight;
+				depth = g_root.rootDepth;
+				x = 0;
+				y = 0;
+			}
+			else if (drawable.type == Object::Type::Window)
+			{
+				const auto& window = drawable.object.get<Object::Window>();
+				width = window.texture().width();
+				height = window.texture().height();
+				depth = g_root.rootDepth;
+				x = window.x;
+				y = window.y;
+			}
+			else if (drawable.type == Object::Type::Pixmap)
+			{
+				const auto& pixmap = drawable.object.get<Object::Pixmap>();
+				width = pixmap.width;
+				height = pixmap.height;
+				depth = pixmap.depth;
+				x = 0;
+				y = 0;
+			}
+			else
+			{
+				ASSERT_NOT_REACHED();
+			}
+
+			xGetGeometryReply reply {
+				.type = X_Reply,
+				.depth = depth,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.root = g_root.windowId,
+				.x = x,
+				.y = y,
+				.width = width,
+				.height = height,
+				.borderWidth = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_QueryTree:
+		{
+			const auto wid = packet.as_span<const CARD32>()[1];
+
+			dprintln("QueryTree");
+			dprintln("  window: {}", wid);
+
+			const auto& object = *client_info.objects[wid];
+			ASSERT(object.type == Object::Type::Window);
+
+			const auto& window = object.object.get<Object::Window>();
+
+			xQueryTreeReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = static_cast<CARD32>(window.children.size()),
+				.root = g_root.windowId,
+				.parent = window.parent,
+				.nChildren = static_cast<CARD16>(window.children.size()),
+			};
+			TRY(encode(client_info.output_buffer, reply));
+			for (auto child_wid : window.children)
+				TRY(encode<CARD32>(client_info.output_buffer, child_wid));
+
+			break;
+		}
+		case X_InternAtom:
+		{
+			auto request = decode<xInternAtomReq>(packet).value();
+
+			auto name = BAN::StringView(reinterpret_cast<const char*>(packet.data()), request.nbytes);
+			dprintln("InternAtom {}", name);
+
+			auto it = g_atoms_name_to_id.find(name);
+			if (it == g_atoms_name_to_id.end() && !request.onlyIfExists)
+			{
+				it = MUST(g_atoms_name_to_id.emplace(name, g_atom_value++));
+				MUST(g_atoms_id_to_name.emplace(it->value, name));
+			}
+
+			xInternAtomReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.atom = it != g_atoms_name_to_id.end() ? it->value : 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_GetAtomName:
+		{
+			const CARD32 atom = packet.as_span<const uint32_t>()[1];
+
+			dprintln("GetAtomName {}", atom);
+
+			auto it = g_atoms_id_to_name.find(atom);
+			if (it == g_atoms_id_to_name.end())
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = 5, // atom
+					.sequenceNumber = client_info.sequence,
+					.resourceID = atom,
+					.minorCode = 0,
+					.majorCode = X_GetAtomName,
+				};
+				TRY(encode(client_info.output_buffer, error));
+			}
+			else
+			{
+				const auto& name = it->value;
+				xGetAtomNameReply reply {
+					.type = X_Reply,
+					.sequenceNumber = client_info.sequence,
+					.length = static_cast<CARD32>((name.size() + 3) / 4),
+					.nameLength = static_cast<CARD16>(name.size()),
+				};
+				TRY(encode(client_info.output_buffer, reply));
+				TRY(encode(client_info.output_buffer, name));
+				for (size_t i = 0; (name.size() + i) % 4; i++)
+					TRY(encode<BYTE>(client_info.output_buffer, 0));
+			}
+
+			break;
+		}
+		case X_ChangeProperty:
+		{
+			auto request = decode<xChangePropertyReq>(packet).value();
+
+			dprintln("ChangeProperty");
+			dprintln("  mode:     {}", request.mode);
+			dprintln("  window:   {}", request.window);
+			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
+			dprintln("  type:     {}", request.type);
+			dprintln("  format:   {}", request.format);
+			dprintln("  nUnits:   {}", request.nUnits);
+
+			ASSERT(request.format == 8 || request.format == 16 || request.format == 32);
+
+			auto& window = TRY_REF(get_window(request.window));
+
+			auto it = window.properties.find(request.property);
+			if (it == window.properties.end())
+			{
+				it = TRY(window.properties.insert(request.property, {
+					.format = request.format,
+					.type = request.type,
+					.data = {},
+				}));
+			}
+			
+			auto& property = it->value;
+			ASSERT(property.format == request.format);
+
+			const size_t bytes = (request.format / 8) * request.nUnits;
+			const size_t old_bytes = property.data.size();
+
+			switch (request.mode)
+			{
+				case PropModeReplace:
+					TRY(property.data.resize(bytes));
+					memcpy(property.data.data(), packet.data(), bytes);
+					break;
+				case PropModePrepend:
+					ASSERT(property.type == request.type);
+					TRY(property.data.resize(old_bytes + bytes));
+					memmove(property.data.data() + old_bytes, property.data.data(), old_bytes);
+					memcpy(property.data.data(), packet.data(), bytes);
+					break;
+				case PropModeAppend:
+					ASSERT(property.type == request.type);
+					TRY(property.data.resize(old_bytes + bytes));
+					memcpy(property.data.data() + old_bytes, packet.data(), bytes);
+					break;
+				default:
+					ASSERT_NOT_REACHED();
+			}
+
+			if (window.event_mask & PropertyChangeMask)
+			{
+				xEvent event = { .u = {
+					.property = {
+						.window = request.window,
+						.atom = request.property,
+						.time = static_cast<CARD32>(time(nullptr)),
+						.state = PropertyNewValue,
+					}
+				}};
+				event.u.u.type = PropertyNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			break;
+		}
+		case X_DeleteProperty:
+		{
+			auto request = decode<xDeletePropertyReq>(packet).value();
+
+			dprintln("DeleteProperty");
+			dprintln("  window:   {}", request.window);
+			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
+
+			auto& object = *client_info.objects[request.window];
+			ASSERT(object.type == Object::Type::Window);
+
+			auto& window = object.object.get<Object::Window>();
+
+			auto it = window.properties.find(request.property);
+			if (it == window.properties.end())
+				break;
+
+			window.properties.remove(it);
+
+			if (window.event_mask & PropertyChangeMask)
+			{
+				xEvent event = { .u = {
+					.property = {
+						.window = request.window,
+						.atom = request.property,
+						.time = static_cast<CARD32>(time(nullptr)),
+						.state = PropertyDelete,
+					}
+				}};
+				event.u.u.type = PropertyNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			break;
+		}
+		case X_GetProperty:
+		{
+			auto request = decode<xGetPropertyReq>(packet).value();
+
+			dprintln("GetProperty");
+			dprintln("  c_delete:   {}", request.c_delete);
+			dprintln("  window:     {}", request.window);
+			dprintln("  property:   {}", g_atoms_id_to_name[request.property]);
+			dprintln("  type:       {}", request.type);
+			dprintln("  longOffset: {}", request.longOffset);
+			dprintln("  longLength: {}", request.longLength);
+
+			auto& object = *client_info.objects[request.window];
+			ASSERT(object.type == Object::Type::Window);
+
+			auto& window = object.object.get<Object::Window>();
+
+			auto it = window.properties.find(request.property);
+			if (it == window.properties.end())
+			{
+				xGetPropertyReply reply {
+					.type = X_Reply,
+					.format = 0,
+					.sequenceNumber = client_info.sequence,
+					.length = 0,
+					.propertyType = None,
+					.bytesAfter = 0,
+					.nItems = 0,
+				};
+				TRY(encode(client_info.output_buffer, reply));
+			}
+			else if (request.type != AnyPropertyType && request.type != it->value.type)
+			{
+				const auto& property = it->value;
+
+				xGetPropertyReply reply {
+					.type = X_Reply,
+					.format = property.format,
+					.sequenceNumber = client_info.sequence,
+					.length = 0,
+					.propertyType = property.type,
+					.bytesAfter = static_cast<CARD32>(property.data.size()),
+					.nItems = 0,
+				};
+				TRY(encode(client_info.output_buffer, reply));
+			}
+			else
+			{
+				const auto& property = it->value;
+	
+				const size_t offset = request.longOffset * 4;
+				const size_t bytes = BAN::Math::min<size_t>(request.longLength * 4, property.data.size() - offset);
+				ASSERT(bytes % (property.format / 8) == 0);
+
+				xGetPropertyReply reply {
+					.type = X_Reply,
+					.format = property.format,
+					.sequenceNumber = client_info.sequence,
+					.length = static_cast<CARD32>((bytes + 3) / 4),
+					.propertyType = property.type,
+					.bytesAfter = static_cast<CARD32>(property.data.size() - offset - bytes),
+					.nItems = static_cast<CARD32>(bytes / (property.format / 8)),
+				};
+				TRY(encode(client_info.output_buffer, reply));
+				TRY(encode(client_info.output_buffer, property.data.span().slice(offset, bytes)));
+				for (size_t i = 0; (bytes + i) % 4; i++)
+					TRY(encode<BYTE>(client_info.output_buffer, 0));
+
+				if (reply.bytesAfter == 0 && request.c_delete)
+				{
+					window.properties.remove(it);
+
+					if (window.event_mask & PropertyChangeMask)
+					{
+						xEvent event = { .u = {
+							.property = {
+								.window = request.window,
+								.atom = request.property,
+								.time = static_cast<CARD32>(time(nullptr)),
+								.state = PropertyDelete,
+							}
+						}};
+						event.u.u.type = PropertyNotify;
+						event.u.u.sequenceNumber = client_info.sequence;
+						TRY(encode(client_info.output_buffer, event));
+					}
+				}
+			}
+
+			break;
+		}
+		case X_SetSelectionOwner:
+		{
+			// FIXME: selection owner should be set to None when owner is destroyed
+
+			auto request = decode<xSetSelectionOwnerReq>(packet).value();
+
+			dprintln("SetSelectionOwner");
+			dprintln("  window:    {}", request.window);
+			dprintln("  selection: {}", g_atoms_id_to_name[request.selection]);
+			dprintln("  time:      {}", request.time);
+
+			if (request.time == CurrentTime)
+				request.time = time(nullptr);
+
+			auto it = g_selections.find(request.selection);
+			if (it != g_selections.end() && it->value.owner != request.window)
+			{
+				xEvent xevent = { .u = {
+					.selectionClear = {
+						.time = it->value.time,
+						.window = it->value.owner,
+						.atom = request.selection,
+					}
+				}};
+				xevent.u.u.type = SelectionClear;
+				xevent.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, xevent));
+			}
+
+			TRY(g_selections.insert_or_assign(request.selection, {
+				.time = request.time,
+				.owner = request.window,
+			}));
+
+			break;
+		}
+		case X_GetSelectionOwner:
+		{
+			const CARD32 atom = packet.as_span<const uint32_t>()[1];
+
+			dprintln("GetSelectionOwner");
+			dprintln("  atom: {}", get_atom_name_safe(atom));
+
+			TRY(validate_atom(atom));
+
+			auto it = g_selections.find(atom);
+			const WINDOW owner = (it == g_selections.end()) ? None : it->value.owner;
+
+			xGetSelectionOwnerReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.owner = owner,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_ConvertSelection:
+		{
+			auto request = decode<xConvertSelectionReq>(packet).value();
+
+			dprintln("ConvertSelection");
+			dprintln("  requestor: {}", request.requestor);
+			dprintln("  selection: {}", get_atom_name_safe(request.selection));
+			dprintln("  target:    {}", get_atom_name_safe(request.target));
+			dprintln("  property:  {}", get_atom_name_safe(request.property));
+			dprintln("  time:      {}", request.time);
+
+			auto it = g_selections.find(request.selection);
+			if (it == g_selections.end() || it->value.owner == None)
+			{
+				xEvent xevent = { .u = {
+					.selectionNotify = {
+						.time = request.time,
+						.requestor = request.requestor,
+						.selection = request.selection,
+						.target = request.target,
+						.property = None,
+					}
+				}};
+				xevent.u.u.type = SelectionNotify;
+				xevent.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, xevent));
+			}
+			else
+			{
+				xEvent xevent = { .u = {
+					.selectionRequest = {
+						.time = request.time,
+						.owner = it->value.owner,
+						.requestor = request.requestor,
+						.selection = request.selection,
+						.target = request.target,
+						.property = None,
+					}
+				}};
+				xevent.u.u.type = SelectionRequest;
+				xevent.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, xevent));
+			}
+
+			break;
+		}
+		case X_SendEvent:
+		{
+			auto request = decode<xSendEventReq>(packet).value();
+
+			dprintln("SendEvent");
+			dprintln("  propagate:   {}", request.propagate);
+			dprintln("  destination: {}", request.destination);
+			dprintln("  eventMask:   {}", request.eventMask);
+
+			auto event = request.event;
+			event.u.u.sequenceNumber = client_info.sequence;
+			TRY(encode(client_info.output_buffer, event));
+
+			break;
+		}
+		case X_GrabPointer:
+		{
+			auto request = decode<xGrabPointerReq>(packet).value();
+
+			dprintln("GrabPointer");
+			dprintln("  ownerEvents:  {}", request.ownerEvents);
+			dprintln("  grabWindow:   {}", request.grabWindow);
+			dprintln("  eventMask:    {}", request.eventMask);
+			dprintln("  pointerMode:  {}", request.pointerMode);
+			dprintln("  keyboardMode: {}", request.keyboardMode);
+			dprintln("  confineTo:    {}", request.confineTo);
+			dprintln("  cursor:       {}", request.cursor);
+			dprintln("  time:         {}", request.time);
+
+			xGrabPointerReply reply {
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_UngrabPointer:
+		{
+			auto time = packet.as_span<const uint32_t>()[1];
+
+			dprintln("UngrabPointer");
+			dprintln("  time: {}", time);
+
+			break;
+		}
+		case X_GrabKeyboard:
+		{
+			auto request = decode<xGrabKeyboardReq>(packet).value();
+
+			dprintln("GrabKeyboard");
+			dprintln("  ownerEvents:  {}", request.ownerEvents);
+			dprintln("  grabWindow:   {}", request.grabWindow);
+			dprintln("  pointerMode:  {}", request.pointerMode);
+			dprintln("  keyboardMode: {}", request.keyboardMode);
+			dprintln("  time:         {}", request.time);
+
+			xGrabKeyboardReply reply {
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_UngrabKeyboard:
+		{
+			auto time = packet.as_span<const uint32_t>()[1];
+
+			dprintln("UngrabKeyboard");
+			dprintln("  time: {}", time);
+
+			break;
+		}
+		case X_GrabServer:
+		{
+			dwarnln("GrabServer");
+			break;
+		}
+		case X_UngrabServer:
+		{
+			dwarnln("UngrabServer");
+			break;
+		}
+		case X_QueryPointer:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("QueryPointer");
+			dprintln("  window: {}", wid);
+
+			const auto& window = TRY_REF(get_window(wid));
+
+			xQueryPointerReply reply {
+				.type = X_Reply,
+				.sameScreen = xTrue,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.root = g_root.windowId,
+				.child = find_child_window(client_info, wid, window.cursor_x, window.cursor_y),
+				.rootX = static_cast<INT16>(window.cursor_x),
+				.rootY = static_cast<INT16>(window.cursor_y),
+				.winX = static_cast<INT16>(window.cursor_x),
+				.winY = static_cast<INT16>(window.cursor_y),
+				.mask = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_TranslateCoords:
+		{
+			auto request = decode<xTranslateCoordsReq>(packet).value();
+
+			dprintln("TranslateCoords");
+			dprintln("  src_wid: {}", request.srcWid);
+			dprintln("  dst_wid: {}", request.dstWid);
+			dprintln("  src_x:   {}", request.srcX);
+			dprintln("  src_y:   {}", request.srcY);
+
+			xTranslateCoordsReply reply {
+				.type = X_Reply,
+				.sameScreen = xTrue,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.child = None,
+				.dstX = request.srcX,
+				.dstY = request.srcY,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_QueryKeymap:
+		{
+			dprintln("QueryKeymap");
+
+			xQueryKeymapReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 2,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_GetInputFocus:
+		{
+			dprintln("GetInputFocus");
+
+			xGetInputFocusReply reply {
+				.type = X_Reply,
+				.revertTo = None,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.focus = g_focus_window,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_CreatePixmap:
+		{
+			auto request = decode<xCreatePixmapReq>(packet).value();
+
+			dprintln("CreatePixmap");
+			dprintln("  depth:    {}", request.depth);
+			dprintln("  pid:      {}", request.pid);
+			dprintln("  drawable: {}", request.drawable);
+			dprintln("  width:    {}", request.width);
+			dprintln("  height:   {}", request.height);
+
+			bool valid_depth = false;
+			for (auto format : g_formats)
+				if (format.depth == request.depth)
+					valid_depth = true;
+			ASSERT(valid_depth);
+
+			BAN::Vector<uint8_t> data;
+			TRY(data.resize(request.width * request.height * 4));
+
+			TRY(client_info.objects.insert(
+				request.pid,
+				TRY(BAN::UniqPtr<Object>::create(Object {
+					.type = Object::Type::Pixmap,
+					.object = Object::Pixmap {
+						.depth = request.depth,
+						.width = request.width,
+						.height = request.height,
+						.data = BAN::move(data),
+					}
+				}))
+			));
+
+			break;
+		}
+		case X_FreePixmap:
+		{
+			const CARD32 pid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("FreePixmap");
+			dprintln("  pixmap: {}", pid);
+
+			auto it = client_info.objects.find(pid);
+			ASSERT(it != client_info.objects.end());
+			ASSERT(it->value->type == Object::Type::Pixmap);
+
+			client_info.objects.remove(it);
+
+			break;
+		}
+		case X_CreateGC:
+		{
+			auto request = decode<xCreateGCReq>(packet).value();
+
+			dprintln("CreateGC");
+			dprintln("  drawable {}", request.drawable);
+			dprintln("  gc       {}", request.gc);
+			dprintln("  mask     {8h}", request.mask);
+
+			uint32_t foreground = 0x000000;
+			uint32_t background = 0x000000;
+			for (size_t i = 0; i < 32; i++)
+			{
+				if (!((request.mask >> i) & 1))
+					continue;
+				const uint32_t value = decode<uint32_t>(packet).value();
+
+				switch (i)
+				{
+					case 2:
+						dprintln("    foreground: {8h}", value);
+						foreground = value;
+						break;
+					case 3:
+						dprintln("    background: {8h}", value);
+						background = value;
+						break;
+					default:
+						dprintln("    {8h}: {8h}", 1 << i, value);
+						break;
+				}
+			}
+
+			TRY(client_info.objects.insert(request.gc, TRY(BAN::UniqPtr<Object>::create(Object {
+				.type = Object::Type::GraphicsContext,
+				.object = Object::GraphicsContext { 
+					.foreground = foreground,
+					.background = background,
+				}
+			}))));
+
+			break;
+		}
+		case X_ChangeGC:
+		{
+			auto request = decode<xChangeGCReq>(packet).value();
+
+			dprintln("ChangeGC");
+			dprintln("  gc       {}", request.gc);
+			dprintln("  mask     {8h}", request.mask);
+
+			auto& object = *client_info.objects[request.gc];
+			ASSERT(object.type == Object::Type::GraphicsContext);
+
+			auto& gc = object.object.get<Object::GraphicsContext>();
+
+			for (size_t i = 0; i < 32; i++)
+			{
+				if (!((request.mask >> i) & 1))
+					continue;
+				const uint32_t value = decode<uint32_t>(packet).value();
+
+				switch (i)
+				{
+					case 2:
+						dprintln("    foreground: {8h}", value);
+						gc.foreground = value;
+						break;
+					case 3:
+						dprintln("    background: {8h}", value);
+						gc.background = value;
+						break;
+					default:
+						dprintln("    {8h}: {8h}", 1 << i, value);
+						break;
+				}
+			}
+
+			break;
+		}
+		case X_FreeGC:
+		{
+			const CARD32 gc = packet.as_span<const uint32_t>()[1];
+
+			dprintln("FreeGC");
+			dprintln("  gc: {}", gc);
+
+			client_info.objects.remove(gc);
+
+			break;
+		}
+		case X_ClearArea:
+		{
+			auto request = decode<xClearAreaReq>(packet).value();
+
+			dprintln("ClearArea");
+			dprintln("  exposures: {}", request.exposures);
+			dprintln("  window:    {}", request.window);
+			dprintln("  x:         {}", request.x);
+			dprintln("  y:         {}", request.y);
+			dprintln("  width:     {}", request.width);
+			dprintln("  height:    {}", request.height);
+
+			auto& object = *client_info.objects[request.window];
+			ASSERT(object.type == Object::Type::Window);
+
+			auto& texture = object.object.get<Object::Window>().texture();
+
+			if (request.width == 0)
+				request.width = texture.width() - request.x;
+			if (request.height == 0)
+				request.height = texture.height() - request.y;
+
+			texture.clear_rect(request.x, request.y, request.width, request.height);
+			invalidate_window(client_info, request.window, request.x, request.y, request.width, request.height);
+
+			break;
+		}
+		case X_CopyArea:
+		{
+			auto request = decode<xCopyAreaReq>(packet).value();
+
+			dprintln("CopyArea");
+			dprintln("  srcDrawable: {}", request.srcDrawable);
+			dprintln("  dstDrawable: {}", request.dstDrawable);
+			dprintln("  srcX:        {}", request.srcX);
+			dprintln("  srcY:        {}", request.srcY);
+			dprintln("  dstX:        {}", request.dstX);
+			dprintln("  dstY:        {}", request.dstY);
+			dprintln("  width:       {}", request.width);
+			dprintln("  heigth:      {}", request.height);
+
+			auto& src_drawable = TRY_REF(get_drawable(request.srcDrawable));
+			auto [src_data, src_w, src_h, src_depth] = get_drawable_info(src_drawable);
+
+			auto& dst_drawable = TRY_REF(get_drawable(request.dstDrawable));
+			auto [dst_data, dst_w, dst_h, dst_depth] = get_drawable_info(dst_drawable);
+
+			const auto get_pixel =
+				[&](int32_t x, int32_t y) -> uint32_t
+				{
+					const int32_t index = y * src_w + x;
+					const auto src_data_u32 = src_data.as_span<uint32_t>();
+					return src_data_u32[index];
+
+					switch (src_depth)
+					{
+						case 1:
+						{
+							const int32_t byte = index / 8;
+							const int32_t bit = index % 8;
+							return (src_data[byte] & (1 << bit)) ? 0xFFFFFF : 0x000000;
+						}
+						case 24:
+						case 32:
+						{
+							const auto src_data_u32 = src_data.as_span<uint32_t>();
+							return src_data_u32[index];
+						}
+						default:
+							ASSERT_NOT_REACHED();
+					}	
+				};
+
+			const auto set_pixel =
+				[&](int32_t x, int32_t y, uint32_t color) -> void
+				{
+					const int32_t index = y * dst_w + x;
+					const auto dst_data_u32 = dst_data.as_span<uint32_t>();
+					dst_data_u32[index] = color;
+
+					switch (dst_depth)
+					{
+						case 1:
+						{
+							const int32_t byte = index / 8;
+							const int32_t bit = index % 8;
+							if (color)
+								dst_data[byte] |=  (1 << bit);
+							else
+								dst_data[byte] &= ~(1 << bit);
+							break;
+						}
+						case 24:
+						case 32:
+						{
+							const auto dst_data_u32 = dst_data.as_span<uint32_t>();
+							dst_data_u32[index] = color;
+							break;
+						}
+						default:
+							ASSERT_NOT_REACHED();
+					}	
+				};
+
+			for (int32_t yoff = 0; yoff < request.height; yoff++)
+			{
+				const int32_t src_y = request.srcY + yoff;
+				const int32_t dst_y = request.dstY + yoff;
+				if (src_y < 0 || src_y >= src_h)
+					continue;
+				if (dst_y < 0 || dst_y >= dst_h)
+					continue;
+				for (int32_t xoff = 0; xoff < request.width; xoff++)
+				{
+					const int32_t src_x = request.srcX + xoff;
+					const int32_t dst_x = request.dstX + xoff;
+					if (src_x < 0 || src_x >= src_w)
+						continue;
+					if (dst_x < 0 || dst_x >= dst_w)
+						continue;
+					set_pixel(dst_x, dst_y, get_pixel(src_x, src_y));
+				}
+			}
+
+			if (dst_drawable.type == Object::Type::Window)
+				invalidate_window(client_info, request.dstDrawable, request.dstX, request.dstY, request.width, request.height);
+
+			break;
+		}
+		case X_PolyFillRectangle:
+		{
+			auto request = decode<xPolyFillRectangleReq>(packet).value();
+
+			dprintln("PolyFillRectangle");
+			dprintln("  drawable: {}", request.drawable);
+			dprintln("  gc:       {}", request.gc);
+
+			auto& gc_object = *client_info.objects[request.gc];
+			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+
+			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
+
+			auto& drawable = TRY_REF(get_drawable(request.drawable));
+			auto [data, w, h, depth] = get_drawable_info(drawable);
+
+			dprintln("  rects:");
+			while (!packet.empty())
+			{
+				const auto rect = decode<xRectangle>(packet).value();
+
+				dprintln("    rect");
+				dprintln("      x, y: {},{}", rect.x, rect.y);
+				dprintln("      w, h: {},{}", rect.width, rect.height);
+
+				const int32_t min_x = BAN::Math::max<int32_t>(rect.x, 0);
+				const int32_t min_y = BAN::Math::max<int32_t>(rect.y, 0);
+				const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width, w);
+				const int32_t max_y = BAN::Math::min<int32_t>(rect.y + rect.height, h);
+
+				auto* data_u32 = data.as_span<uint32_t>().data();
+				for (int32_t y = min_y; y < max_y; y++)
+					for (int32_t x = min_x; x < max_x; x++)
+						data_u32[y * w + x] = foreground;
+
+#if 0
+				switch (depth)
+				{
+					case 1:
+					{
+						for (int32_t y = min_y; y < max_y; y++)
+						{
+							for (int32_t x = min_x; x < max_x; x++)
+							{
+								const size_t index = y * w + x;
+								const size_t byte = index / 8;
+								const size_t bit = index % 8;
+								if (foreground)
+									data[byte] |=  (1 << bit);
+								else
+									data[byte] &= ~(1 << bit);
+							}
+						}
+						break;
+					}
+					case 24:
+					case 32:
+					{
+						auto* data_u32 = data.as_span<uint32_t>().data();
+						for (int32_t y = min_y; y < max_y; y++)
+							for (int32_t x = min_x; x < max_x; x++)
+								data_u32[y * w + x] = foreground;
+						break;
+					}
+					default:
+						ASSERT_NOT_REACHED();
+				}
+#endif
+
+				if (drawable.type == Object::Type::Window)
+					invalidate_window(client_info, request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
+			}
+
+			break;
+		}
+		case X_PolyFillArc:
+		{
+			auto request = decode<xPolyFillArcReq>(packet).value();
+
+			dprintln("PolyFillArc");
+			dprintln("  drawable: {}", request.drawable);
+			dprintln("  gc:       {}", request.gc);
+
+			auto& gc_object = *client_info.objects[request.gc];
+			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+
+			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
+
+			auto& object = *client_info.objects[request.drawable];
+			ASSERT(object.type == Object::Type::Window);
+
+			auto& texture = object.object.get<Object::Window>().texture();
+
+			const auto normalize_angle =
+				[](float f) -> float
+				{
+					const float radians = f * (2.0f * BAN::numbers::pi_v<float> / 64.0f / 360.0f);
+					const float mod = BAN::Math::fmod(radians, 2.0f * BAN::numbers::pi_v<float>);
+					if (mod < 0.0f)
+						return mod + 2.0f * BAN::numbers::pi_v<float>;
+					return mod;
+				};
+
+			dprintln("  arcs:");
+			while (!packet.empty())
+			{
+				const auto arc = decode<xArc>(packet).value();
+
+				dprintln("    arc");
+				dprintln("      x,  y:  {},{}", arc.x, arc.y);
+				dprintln("      w,  h:  {},{}", arc.width, arc.height);
+				dprintln("      a1, a2: {},{}", arc.angle1, arc.angle2);
+
+				const int32_t min_x = BAN::Math::max<int32_t>(0, arc.x);
+				const int32_t min_y = BAN::Math::max<int32_t>(0, arc.y);
+				
+				const int32_t max_x = BAN::Math::min<int32_t>(texture.width(),  arc.x + arc.width);
+				const int32_t max_y = BAN::Math::min<int32_t>(texture.height(), arc.y + arc.height);
+
+				const auto rx = arc.width / 2;
+				const auto ry = arc.height / 2;
+
+				const auto cx = arc.x + rx;
+				const auto cy = arc.y + ry;
+
+				auto angle1 = normalize_angle(arc.angle1);
+				auto angle2 = normalize_angle(arc.angle1 + arc.angle2);
+				if (arc.angle2 < 0)
+					BAN::swap(angle1, angle2);
+
+				const bool full_circle = BAN::Math::abs(arc.angle2) >= 360 * 64;
+
+				for (int32_t y = min_y; y < max_y; y++)
+				{
+					for (int32_t x = min_x; x < max_x; x++)
+					{
+						const int32_t dx = x - cx;
+						const int32_t dy = cy - y;
+
+						if ((float)(dx*dx) / (rx*rx) + (float)(dy*dy) / (ry*ry) > 1.0f)
+							continue;
+
+						if (!full_circle)
+						{
+							const auto theta = BAN::Math::atan2<float>(dy, dx);
+							if (angle1 <= angle2)
+							{
+								if (!(theta >= angle1 && theta <= angle2))
+									continue;
+							}
+							else
+							{
+								if (!(theta >= angle1 || theta <= angle2))
+									continue;
+							}
+						}
+
+						texture.set_pixel(x, y, foreground);
+					}
+				}
+
+				invalidate_window(client_info, request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
+			}
+
+			break;
+		}
+		case X_PutImage:
+		{
+			auto request = decode<xPutImageReq>(packet).value();
+
+#if 0
+			dprintln("PutImage");
+			dprintln("  drawable: {}", request.drawable);
+			dprintln("  format:   {}", request.format);
+			dprintln("  depth:    {}", request.depth);
+			dprintln("  dstX:     {}", request.dstX);
+			dprintln("  dstY:     {}", request.dstY);
+			dprintln("  width:    {}", request.width);
+			dprintln("  height:   {}", request.height);
+#endif
+
+			auto& object = *client_info.objects[request.drawable];
+			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
+
+			if (packet.empty())
+			{
+				dwarnln("no data in PutImage");
+				break;
+			}
+
+			auto* out_data_u32 = out_data.as_span<uint32_t>().data();
+
+			switch (request.format)
+			{
+				case 0:
+				{
+					for (CARD32 y = 0; y < request.height; y++)
+					{
+						const auto dst_y = request.dstY + y;
+						if (dst_y < 0 || dst_y >= out_h)
+							continue;
+						for (CARD32 x = 0; x < request.width; x++)
+						{
+							const auto dst_x = request.dstX + x;
+							if (dst_x < 0 || dst_x >= out_w)
+								continue;
+							const auto bit_index = y * request.width + x;
+							const auto byte = bit_index / 8;
+							const auto bit = bit_index % 8;
+							out_data_u32[dst_y * out_w + dst_x] = (packet[byte] & (1 << bit)) ? 0xFFFFFF : 0x000000; 
+						}
+					}
+					break;
+				}
+				case 2:
+				{
+					auto* pixels_u32 = packet.as_span<const uint32_t>().data();
+					for (CARD32 y = 0; y < request.height; y++)
+					{
+						const auto dst_y = request.dstY + y;
+						if (dst_y < 0 || dst_y >= out_h)
+							continue;
+						for (CARD32 x = 0; x < request.width; x++)
+						{
+							const auto dst_x = request.dstX + x;
+							if (dst_x < 0 || dst_x >= out_w)
+								continue;
+							out_data_u32[(request.dstY + y) * out_w + (request.dstX + x)] = pixels_u32[y * request.width + x];
+						}
+					}
+					break;
+				}
+				default:
+					dwarnln("PutImage unsupported format {}, depth {}", request.format, request.depth);
+					break;
+			}
+
+			if (object.type == Object::Type::Window)
+				invalidate_window(client_info, request.drawable, request.dstX, request.dstY, request.width, request.height);
+
+			break;
+		}
+		case X_GetImage:
+		{
+			auto request = decode<xGetImageReq>(packet).value();
+
+			dprintln("GetImage");
+			dprintln("  drawable:  {}", request.drawable);
+			dprintln("  format:    {}", request.format);
+			dprintln("  depth:     {}", request.x);
+			dprintln("  dstX:      {}", request.y);
+			dprintln("  width:     {}", request.width);
+			dprintln("  height:    {}", request.height);
+			dprintln("  planeMask: {}", request.planeMask);
+
+			auto& object = *client_info.objects[request.drawable];
+			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
+
+			// ZPixmap
+			if (request.format != 2)
+			{
+				dwarnln("GetImage unsupported format {}", request.format);
+				break;
+			}
+
+			ASSERT(request.x >= 0 && request.y >= 0);
+			ASSERT(request.x + request.width <= out_w);
+			ASSERT(request.y + request.height <= out_h);
+
+			xGetImageReply reply {
+				.type = X_Reply,
+				.depth = out_depth,
+				.sequenceNumber = client_info.sequence,
+				.length = static_cast<CARD32>(request.width * request.height),
+				.visual = g_visual.visualID,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+			for (int32_t y = 0; y < request.height; y++)
+			{
+				const size_t index = (request.y + y) * out_w + request.x;
+				const auto slice = out_data.slice(index * 4, request.width * 4);
+				TRY(encode(client_info.output_buffer, slice));
+			}
+
+			break;
+		}
+		case X_CreateColormap:
+		{
+			auto request = decode<xCreateColormapReq>(packet).value();
+
+			dprintln("CreateColormap");
+			dprintln("  alloc:  {}", request.alloc);
+			dprintln("  mid:    {}", request.mid);
+			dprintln("  window: {}", request.window);
+			dprintln("  visual: {}", request.visual);
+
+			break;
+		}
+		case X_AllocColor:
+		{
+			auto request = decode<xAllocColorReq>(packet).value();
+
+			dprintln("AllocColor");
+			dprintln("  cmap:  {}", request.cmap);
+			dprintln("  red:   {}", request.red);
+			dprintln("  green: {}", request.green);
+			dprintln("  blue:  {}", request.blue);
+
+			// FIXME
+			xAllocColorReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.red = request.red,
+				.green = request.green,
+				.blue = request.blue,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_AllocNamedColor:
+		{
+			auto request = decode<xAllocNamedColorReq>(packet).value();
+
+			dprintln("AllocNamedColor");
+			dprintln("  cmap:   {}", request.cmap);
+			dprintln("  name:   {}", BAN::StringView((const char*)packet.data(), request.nbytes));
+
+			// FIXME
+			xAllocNamedColorReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_QueryColors:
+		{
+			auto request = decode<xQueryColorsReq>(packet).value();
+
+			dprintln("QueryColors");
+			dprintln("  cmap: {}", request.cmap);
+
+			const size_t count = packet.size() / 4;
+
+			xQueryColorsReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = static_cast<CARD32>(2 * count),
+				.nColors = static_cast<CARD16>(count),
+			};
+			TRY(encode(client_info.output_buffer, reply));
+			
+			dprintln("  colors:");
+			for (size_t i = 0; i < count; i++)
+			{
+				const auto color = decode<uint32_t>(packet).value();
+				dprintln("    {8h}", color);
+
+				const uint8_t r = (color >> 16) & 0xFF;
+				const uint8_t g = (color >>  8) & 0xFF;
+				const uint8_t b = (color >>  0) & 0xFF;
+
+				TRY(encode<uint16_t>(client_info.output_buffer, (r << 8) | r));
+				TRY(encode<uint16_t>(client_info.output_buffer, (g << 8) | g));
+				TRY(encode<uint16_t>(client_info.output_buffer, (b << 8) | b));
+				TRY(encode<uint16_t>(client_info.output_buffer, 0));
+			}
+
+			break;
+		}
+		case X_QueryExtension:
+		{
+			auto request = decode<xQueryExtensionReq>(packet).value();
+
+			auto name = BAN::StringView((char*)packet.data(), request.nbytes);
+			dprintln("QueryExtension {}", name);
+
+			xQueryExtensionReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.present = xFalse,
+				.major_opcode = 0,
+				.first_event = 0,
+				.first_error = 0,
+			};
+
+			for (const auto& extension : g_extensions)
+			{
+				if (extension.name != name)
+					continue;
+				reply.present = xTrue;
+				reply.major_opcode = extension.major_opcode;
+				break;
+			}
+
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_ListExtensions:
+		{
+			dprintln("ListExtensions");
+
+			CARD8 extension_count = 0;
+			CARD32 extension_length = 0;
+			for (const auto& extension : g_extensions)
+			{
+				if (extension.handler == nullptr)
+					continue;
+				extension_count++;
+				extension_length += extension.name.size() + 1;
+			}
+
+			xListExtensionsReply reply {
+				.type = X_Reply,
+				.nExtensions = extension_count,
+				.sequenceNumber = client_info.sequence,
+				.length = (extension_length + 3) / 4,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			for (const auto& extension : g_extensions)
+			{
+				if (extension.handler == nullptr)
+					continue;
+				TRY(encode(client_info.output_buffer, extension.name));
+				TRY(encode(client_info.output_buffer, '\0'));
+			}
+
+			for (size_t i = 0; (extension_length + i) % 4; i++)
+				TRY(encode(client_info.output_buffer, '\0'));
+
+			break;
+		}
+		case X_GetKeyboardMapping:
+		{
+			auto request = decode<xGetKeyboardMappingReq>(packet).value();
+
+			dprintln("GetKeyboardMapping");
+			dprintln("  firstKeyCode: {}", request.firstKeyCode);
+			dprintln("  count:        {}", request.count);
+
+			ASSERT(request.firstKeyCode + request.count - 1 <= g_keymap.size);
+
+			xGetKeyboardMappingReply reply {
+				.type = X_Reply,
+				.keySymsPerKeyCode = 1,
+				.sequenceNumber = client_info.sequence,
+				.length = request.count,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			for (size_t i = 0; i < request.count; i++)
+				TRY(encode<CARD32>(client_info.output_buffer, g_keymap.map[request.firstKeyCode + i]));
+
+			break;
+		}
+		case X_GetKeyboardControl:
+		{
+			dprintln("GetKeyboardControl");
+
+			// FIXME:
+			xGetKeyboardControlReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 5,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_GetPointerMapping:
+		{
+			dprintln("GetPointerMapping");
+
+			// FIXME:
+			xGetPointerMappingReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 2,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			for (size_t i = 0; i < 8; i++)
+				TRY(encode<CARD8>(client_info.output_buffer, i));
+
+			break;
+		}
+		case X_GetModifierMapping:
+		{
+			dprintln("GetModifierMapping");
+
+			xGetModifierMappingReply reply {
+				.type = X_Reply,
+				.numKeyPerModifier = 2,
+				.sequenceNumber = client_info.sequence,
+				.length = 4,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			// shift
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::LeftShift)));
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::RightShift)));
+
+			// lock
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::CapsLock)));
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
+
+			// control
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::LeftCtrl)));
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::RightCtrl)));
+
+			// Mod1 -> Mod5
+			for (size_t i = 1; i <= 5; i++)
+			{
+				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
+				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
+			}
+
+			break;
+		}
+		default:
+			dwarnln("unsupported opcode {}", opcode_to_name[packet[0]]);
+			for (size_t i = 0; i < packet.size(); i++)
+				fprintf(stddbg, " %02x", packet[i]);
+			fprintf(stddbg, "\n");
+			break;
+	}
+
+	return {};
+}

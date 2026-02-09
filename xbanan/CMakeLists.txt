@@ -1,5 +1,8 @@
 set(SOURCES
 	main.cpp
+	Base.cpp
+	Extensions.cpp
+	ExtRANDR.cpp
 )
 
 add_executable(xbanan ${SOURCES})

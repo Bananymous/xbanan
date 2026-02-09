@@ -2781,6 +2781,24 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_AllocNamedColor:
+		{
+			auto request = decode<xAllocNamedColorReq>(packet).value();
+
+			dprintln("AllocNamedColor");
+			dprintln("  cmap:   {}", request.cmap);
+			dprintln("  name:   {}", BAN::StringView((const char*)packet.data(), request.nbytes));
+
+			// FIXME
+			xAllocNamedColorReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
 		case X_QueryColors:
 		{
 			auto request = decode<xQueryColorsReq>(packet).value();

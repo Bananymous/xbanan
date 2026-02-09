@@ -2850,13 +2850,34 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			dprintln("ListExtensions");
 
+			CARD8 extension_count = 0;
+			CARD32 extension_length = 0;
+			for (const auto& extension : g_extensions)
+			{
+				if (extension.handler == nullptr)
+					continue;
+				extension_count++;
+				extension_length += extension.name.size() + 1;
+			}
+
 			xListExtensionsReply reply {
 				.type = X_Reply,
-				.nExtensions = 0,
+				.nExtensions = extension_count,
 				.sequenceNumber = client_info.sequence,
-				.length = 0,
+				.length = (extension_length + 3) / 4,
 			};
 			TRY(encode(client_info.output_buffer, reply));
+
+			for (const auto& extension : g_extensions)
+			{
+				if (extension.handler == nullptr)
+					continue;
+				TRY(encode(client_info.output_buffer, extension.name));
+				TRY(encode(client_info.output_buffer, '\0'));
+			}
+
+			for (size_t i = 0; (extension_length + i) % 4; i++)
+				TRY(encode(client_info.output_buffer, '\0'));
 
 			break;
 		}

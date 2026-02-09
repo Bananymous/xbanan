@@ -2904,18 +2904,67 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_GetKeyboardControl:
+		{
+			dprintln("GetKeyboardControl");
+
+			// FIXME:
+			xGetKeyboardControlReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 5,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_GetPointerMapping:
+		{
+			dprintln("GetPointerMapping");
+
+			// FIXME:
+			xGetPointerMappingReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 2,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			for (size_t i = 0; i < 8; i++)
+				TRY(encode<CARD8>(client_info.output_buffer, i));
+
+			break;
+		}
 		case X_GetModifierMapping:
 		{
 			dprintln("GetModifierMapping");
 
 			xGetModifierMappingReply reply {
 				.type = X_Reply,
-				.numKeyPerModifier = 1,
+				.numKeyPerModifier = 2,
 				.sequenceNumber = client_info.sequence,
-				.length = 2,
+				.length = 4,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode<uint64_t>(client_info.output_buffer, 0));
+
+			// shift
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::LeftShift)));
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::RightShift)));
+
+			// lock
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::CapsLock)));
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
+
+			// control
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::LeftCtrl)));
+			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::RightCtrl)));
+
+			// Mod1 -> Mod5
+			for (size_t i = 1; i <= 5; i++)
+			{
+				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
+				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
+			}
 
 			break;
 		}

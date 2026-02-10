@@ -726,7 +726,7 @@ static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 	return {};
 }
 
-static WINDOW find_child_window(WINDOW wid, int32_t x, int32_t y)
+static WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y)
 {
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
@@ -754,56 +754,16 @@ static WINDOW find_child_window(WINDOW wid, int32_t x, int32_t y)
 		ASSERT(child_object.type == Object::Type::Window);
 
 		auto& child_window = child_object.object.get<Object::Window>();
-		if (auto result = find_child_window(child_wid, x - child_window.x, y - child_window.y); result != None)
+
+		x -= child_window.x;
+		y -= child_window.y;
+		if (auto result = find_child_window(child_wid, x, y); result != None)
 			return result;
+		x += child_window.x;
+		y += child_window.y;
 	}
 
 	return wid;
-}
-
-static void send_mouse_move_events(Client& client_info, WINDOW wid, WINDOW event_child_wid, int32_t x, int32_t y)
-{
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-
-	auto& window = object.object.get<Object::Window>();
-	window.cursor_x = x;
-	window.cursor_y = y;
-
-	for (auto child_wid : window.children)
-	{
-		auto& child_object = *g_objects[child_wid];
-		ASSERT(child_object.type == Object::Type::Window);
-
-		auto& child_window = object.object.get<Object::Window>();
-		send_mouse_move_events(client_info, child_wid, event_child_wid, x - child_window.x, y - child_window.y);
-	}
-
-	auto& texture = window.texture();
-	if (x < 0 || y < 0 || x >= texture.width() || y >= texture.height())
-		return;
-
-	if (!(window.event_mask & PointerMotionMask))
-		return;
-
-	xEvent xevent { .u = {
-		.keyButtonPointer = {
-			.time = static_cast<CARD32>(time(nullptr)),
-			.root = g_root.windowId,
-			.event = wid,
-			.child = event_child_wid,
-			.rootX = static_cast<INT16>(x),
-			.rootY = static_cast<INT16>(y),
-			.eventX = static_cast<INT16>(x),
-			.eventY = static_cast<INT16>(y),
-			.state = 0,
-			.sameScreen = xTrue,
-		}
-	}};
-	xevent.u.u.type = MotionNotify,
-	xevent.u.u.detail = NotifyNormal;
-	xevent.u.u.sequenceNumber = client_info.sequence;
-	MUST(encode(client_info.output_buffer, xevent));
 }
 
 static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
@@ -951,6 +911,92 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 	}
 }
 
+static void send_exposure_recursive(Client& client_info, WINDOW wid)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (!window.mapped)
+		return;
+
+	for (auto child_wid : window.children)
+		send_exposure_recursive(client_info, child_wid);
+
+	window.texture().clear();
+
+	if (window.event_mask & ExposureMask)
+	{
+		xEvent event = { .u = {
+			.expose = {
+				.window = wid,
+				.x = 0,
+				.y = 0,
+				.width = static_cast<CARD16>(window.texture().width()),
+				.height = static_cast<CARD16>(window.texture().height()),
+			}
+		}};
+		event.u.u.type = Expose;
+		event.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, event));
+	}
+}
+
+static void on_window_resize_event(Client& client_info, WINDOW wid)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (window.event_mask & StructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.configureNotify = {
+				.event = wid,
+				.window = wid,
+				.aboveSibling = xFalse,
+				.x = static_cast<INT16>(window.x),
+				.y = static_cast<INT16>(window.y),
+				.width = static_cast<CARD16>(window.texture().width()),
+				.height = static_cast<CARD16>(window.texture().height()),
+				.borderWidth = 0,
+				.override = xFalse,
+			}
+		}};
+		event.u.u.type = ConfigureNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, event));
+	}
+
+	auto& parent_object = *g_objects[window.parent];
+	ASSERT(parent_object.type == Object::Type::Window);
+
+	auto& parent_window = parent_object.object.get<Object::Window>();
+	if (parent_window.event_mask & SubstructureNotifyMask)
+	{
+		xEvent event = { .u = {
+			.configureNotify = {
+				.event = window.parent,
+				.window = wid,
+				.aboveSibling = xFalse,
+				.x = static_cast<INT16>(window.x),
+				.y = static_cast<INT16>(window.y),
+				.width = static_cast<CARD16>(window.texture().width()),
+				.height = static_cast<CARD16>(window.texture().height()),
+				.borderWidth = 0,
+				.override = xFalse,
+			}
+		}};
+		event.u.u.type = ConfigureNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, event));
+	}
+
+	send_exposure_recursive(client_info, wid);
+
+	invalidate_window(wid, 0, 0, window.texture().width(), window.texture().height());
+}
+
 static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
 {
 	if (focused)
@@ -982,30 +1028,37 @@ static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
 	MUST(encode(client_info.output_buffer, xevent));
 }
 
-static void on_mouse_move_event(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+static void send_key_button_pointer_event(Client& client_info, WINDOW wid, KeyButMask state, BYTE detail, uint32_t event_mask, BYTE event_type)
 {
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
+	int32_t root_x, root_y;
+	int32_t event_x, event_y;
 
-	auto& window = object.object.get<Object::Window>();
-	send_enter_and_leave_events(client_info, wid, window.cursor_x, window.cursor_y, x, y);
-	send_mouse_move_events(client_info, wid, find_child_window(wid, x, y), x, y);
-}
+	{
+		auto& object = *g_objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+		auto& window = object.object.get<Object::Window>();
+		root_x = event_x = window.cursor_x;
+		root_y = event_y = window.cursor_y;
+	}
 
-static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutton, bool pressed)
-{
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
+	const auto child_wid = find_child_window(wid, event_x, event_y);
+	wid = child_wid;
 
-	auto& window = object.object.get<Object::Window>();
+	while (wid != None)
+	{
+		auto& object = *g_objects[wid];
+		ASSERT(object.type == Object::Type::Window);
+		auto& window = object.object.get<Object::Window>();
+		if (window.event_mask & event_mask)
+			break;
 
-	for (auto child_wid : window.children)
-		on_mouse_button_event(client_info, child_wid, xbutton, pressed);
+		event_x += window.x;
+		event_y += window.y;
+		wid = window.parent;
+	}
 
-	if (!(window.event_mask & (pressed ? ButtonPressMask : ButtonReleaseMask)))
+	if (wid == None)
 		return;
-
-	const auto child_wid = find_child_window(wid, window.cursor_x, window.cursor_y);
 
 	xEvent xevent { .u = {
 		.keyButtonPointer = {
@@ -1013,34 +1066,66 @@ static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutt
 			.root = g_root.windowId,
 			.event = wid,
 			.child = child_wid,
-			.rootX = static_cast<INT16>(window.cursor_x),
-			.rootY = static_cast<INT16>(window.cursor_y),
-			.eventX = static_cast<INT16>(child_wid == None ? 0 : window.cursor_x),
-			.eventY = static_cast<INT16>(child_wid == None ? 0 : window.cursor_y),
-			.state = 0,
+			.rootX = static_cast<INT16>(root_x),
+			.rootY = static_cast<INT16>(root_y),
+			.eventX = static_cast<INT16>(event_x),
+			.eventY = static_cast<INT16>(event_y),
+			.state = state,
 			.sameScreen = xTrue,
 		}
 	}};
-	xevent.u.u.type = pressed ? ButtonPress : ButtonRelease,
-	xevent.u.u.detail = xbutton;
+	xevent.u.u.type = event_type,
+	xevent.u.u.detail = detail;
 	xevent.u.u.sequenceNumber = client_info.sequence;
 	MUST(encode(client_info.output_buffer, xevent));
+}
+
+static void update_cursor_position_recursive(WINDOW wid, int32_t new_x, int32_t new_y)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+	auto& window = object.object.get<Object::Window>();
+
+	window.cursor_x = new_x;
+	window.cursor_y = new_y;
+
+	for (auto child_wid : window.children)
+	{
+		auto& child_object = *g_objects[child_wid];
+		ASSERT(child_object.type == Object::Type::Window);
+		auto& child_window = child_object.object.get<Object::Window>();
+		update_cursor_position_recursive(child_wid, new_x - child_window.x, new_y - child_window.y);
+	}
+}
+
+static void on_mouse_move_event(Client& client_info, WINDOW wid, int32_t x, int32_t y)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+	auto& window = object.object.get<Object::Window>();
+
+	send_enter_and_leave_events(client_info, wid, window.cursor_x, window.cursor_y, x, y);
+
+	update_cursor_position_recursive(wid, x, y);
+
+	send_key_button_pointer_event(client_info, wid, 0, NotifyNormal, PointerMotionMask, MotionNotify);
+}
+
+static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutton, bool pressed)
+{
+	send_key_button_pointer_event(
+		client_info,
+		wid,
+		0,
+		xbutton,
+		pressed ? ButtonPressMask : ButtonReleaseMask,
+		pressed ? ButtonPress     : ButtonRelease
+	);
 }
 
 static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t event)
 {
 	if (g_keymap.map[static_cast<BYTE>(event.key)] == XK_VoidSymbol)
-		return;
-
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-
-	auto& window = object.object.get<Object::Window>();
-
-	for (auto child_wid : window.children)
-		on_key_event(client_info, child_wid, event);
-
-	if (!(window.event_mask & (event.pressed() ? KeyPressMask : KeyReleaseMask)))
 		return;
 
 	CARD8 xmodifier = 0;
@@ -1051,24 +1136,14 @@ static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::K
 	if (event.ctrl())
 		xmodifier |= ControlMask;
 
-	xEvent xevent { .u = {
-		.keyButtonPointer = {
-			.time = static_cast<CARD32>(time(nullptr)),
-			.root = g_root.windowId,
-			.event = wid,
-			.child = find_child_window(wid, window.cursor_x, window.cursor_y),
-			.rootX = static_cast<INT16>(window.cursor_x),
-			.rootY = static_cast<INT16>(window.cursor_y),
-			.eventX = static_cast<INT16>(window.cursor_x),
-			.eventY = static_cast<INT16>(window.cursor_y),
-			.state = xmodifier,
-			.sameScreen = xTrue,
-		}
-	}};
-	xevent.u.u.type = event.pressed() ? KeyPress : KeyRelease,
-	xevent.u.u.detail = static_cast<BYTE>(event.key);
-	xevent.u.u.sequenceNumber = client_info.sequence;
-	MUST(encode(client_info.output_buffer, xevent));
+	send_key_button_pointer_event(
+		client_info,
+		wid,
+		xmodifier,
+		static_cast<BYTE>(event.key),
+		event.pressed() ? KeyPressMask : KeyReleaseMask,
+		event.pressed() ? KeyPress     : KeyRelease
+	);
 }
 
 BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
@@ -1261,6 +1336,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				attributes.shown = false;
 				attributes.title_bar = false;
 				attributes.alpha_channel = true;
+				attributes.resizable = true;
 
 				auto gui_window = TRY(LibGUI::Window::create(request.width, request.height, "window?"_sv, attributes));
 				gui_window->texture().set_bg_color(background);
@@ -1304,55 +1380,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				const WINDOW wid = request.wid;
 				gui_window_ptr->set_close_window_event_callback([]{});
 				gui_window_ptr->set_resize_window_event_callback([&client_info, wid]() {
-					auto& object = *g_objects[wid];
-					ASSERT(object.type == Object::Type::Window);
-
-					auto& window = object.object.get<Object::Window>();
-					if (window.event_mask & StructureNotifyMask)
-					{
-						xEvent event = { .u = {
-							.configureNotify = {
-								.event = wid,
-								.window = wid,
-								.aboveSibling = xFalse,
-								.x = static_cast<INT16>(window.x),
-								.y = static_cast<INT16>(window.y),
-								.width = static_cast<CARD16>(window.texture().width()),
-								.height = static_cast<CARD16>(window.texture().height()),
-								.borderWidth = 0,
-								.override = xFalse,
-							}
-						}};
-						event.u.u.type = ConfigureNotify;
-						event.u.u.sequenceNumber = client_info.sequence;
-						MUST(encode(client_info.output_buffer, event));
-					}
-
-					auto& parent_object = *g_objects[window.parent];
-					ASSERT(parent_object.type == Object::Type::Window);
-
-					auto& parent_window = parent_object.object.get<Object::Window>();
-					if (parent_window.event_mask & SubstructureNotifyMask)
-					{
-						xEvent event = { .u = {
-							.configureNotify = {
-								.event = window.parent,
-								.window = wid,
-								.aboveSibling = xFalse,
-								.x = static_cast<INT16>(window.x),
-								.y = static_cast<INT16>(window.y),
-								.width = static_cast<CARD16>(window.texture().width()),
-								.height = static_cast<CARD16>(window.texture().height()),
-								.borderWidth = 0,
-								.override = xFalse,
-							}
-						}};
-						event.u.u.type = ConfigureNotify;
-						event.u.u.sequenceNumber = client_info.sequence;
-						MUST(encode(client_info.output_buffer, event));
-					}
-
-					invalidate_window(wid, 0, 0, window.texture().width(), window.texture().height());
+					on_window_resize_event(client_info, wid);
 				});
 				gui_window_ptr->set_window_focus_event_callback([&client_info, wid](auto event) {
 					on_window_focus_event(client_info, wid, event.focused);
@@ -2210,17 +2238,24 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			const auto& window = TRY_REF(get_window(wid));
 
+			int32_t root_x, root_y;
+			int32_t event_x, event_y;
+			root_x = event_x = window.cursor_x;
+			root_y = event_y = window.cursor_y;
+
+			const auto child_wid = find_child_window(wid, event_x, event_y);
+
 			xQueryPointerReply reply {
 				.type = X_Reply,
 				.sameScreen = xTrue,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 				.root = g_root.windowId,
-				.child = find_child_window(wid, window.cursor_x, window.cursor_y),
-				.rootX = static_cast<INT16>(window.cursor_x),
-				.rootY = static_cast<INT16>(window.cursor_y),
-				.winX = static_cast<INT16>(window.cursor_x),
-				.winY = static_cast<INT16>(window.cursor_y),
+				.child = static_cast<CARD32>(child_wid == wid ? None : child_wid),
+				.rootX = static_cast<INT16>(root_x),
+				.rootY = static_cast<INT16>(root_y),
+				.winX = static_cast<INT16>(event_x),
+				.winY = static_cast<INT16>(event_y),
 				.mask = 0,
 			};
 			TRY(encode(client_info.output_buffer, reply));

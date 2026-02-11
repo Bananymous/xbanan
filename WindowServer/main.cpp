@@ -8,12 +8,6 @@
 #include <LibGUI/Window.h>
 #include <LibInput/KeyboardLayout.h>
 
-#include <SDL2/SDL_keycode.h>
-#include <SDL2/SDL_mouse.h>
-#include <SDL2/SDL_video.h>
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -33,8 +27,6 @@ extern SDL_Surface* g_surface;
 extern SDL_Texture* g_texture;
 extern SDL_Window* g_window;
 
-
-
 struct Keymap
 {
 	consteval Keymap()
@@ -46,111 +38,115 @@ struct Keymap
 		using LibInput::keycode_function;
 		using LibInput::keycode_numpad;
 
-		map[SDL_SCANCODE_GRAVE] = keycode_normal(0,  0);
-		map[SDL_SCANCODE_1] = keycode_normal(0,  1);
-		map[SDL_SCANCODE_2] = keycode_normal(0,  2);
-		map[SDL_SCANCODE_3] = keycode_normal(0,  3);
-		map[SDL_SCANCODE_4] = keycode_normal(0,  4);
-		map[SDL_SCANCODE_5] = keycode_normal(0,  5);
-		map[SDL_SCANCODE_6] = keycode_normal(0,  6);
-		map[SDL_SCANCODE_7] = keycode_normal(0,  7);
-		map[SDL_SCANCODE_8] = keycode_normal(0,  8);
-		map[SDL_SCANCODE_9] = keycode_normal(0,  9);
-		map[SDL_SCANCODE_0] = keycode_normal(0, 10);
-		map[SDL_SCANCODE_MINUS] = keycode_normal(0, 11);
-		map[SDL_SCANCODE_EQUALS] = keycode_normal(0, 12);
+		map[SDL_SCANCODE_GRAVE]     = keycode_normal(0,  0);
+		map[SDL_SCANCODE_1]         = keycode_normal(0,  1);
+		map[SDL_SCANCODE_2]         = keycode_normal(0,  2);
+		map[SDL_SCANCODE_3]         = keycode_normal(0,  3);
+		map[SDL_SCANCODE_4]         = keycode_normal(0,  4);
+		map[SDL_SCANCODE_5]         = keycode_normal(0,  5);
+		map[SDL_SCANCODE_6]         = keycode_normal(0,  6);
+		map[SDL_SCANCODE_7]         = keycode_normal(0,  7);
+		map[SDL_SCANCODE_8]         = keycode_normal(0,  8);
+		map[SDL_SCANCODE_9]         = keycode_normal(0,  9);
+		map[SDL_SCANCODE_0]         = keycode_normal(0, 10);
+		map[SDL_SCANCODE_MINUS]     = keycode_normal(0, 11);
+		map[SDL_SCANCODE_EQUALS]    = keycode_normal(0, 12);
 		map[SDL_SCANCODE_BACKSPACE] = keycode_normal(0, 13);
-		map[SDL_SCANCODE_TAB] = keycode_normal(1,  0);
-		map[SDL_SCANCODE_Q] = keycode_normal(1,  1);
-		map[SDL_SCANCODE_W] = keycode_normal(1,  2);
-		map[SDL_SCANCODE_E] = keycode_normal(1,  3);
-		map[SDL_SCANCODE_R] = keycode_normal(1,  4);
-		map[SDL_SCANCODE_T] = keycode_normal(1,  5);
-		map[SDL_SCANCODE_Y] = keycode_normal(1,  6);
-		map[SDL_SCANCODE_U] = keycode_normal(1,  7);
-		map[SDL_SCANCODE_I] = keycode_normal(1,  8);
-		map[SDL_SCANCODE_O] = keycode_normal(1,  9);
-		map[SDL_SCANCODE_P] = keycode_normal(1, 10);
-		map[SDL_SCANCODE_LEFTBRACKET] = keycode_normal(1, 11);
+
+		map[SDL_SCANCODE_TAB]          = keycode_normal(1,  0);
+		map[SDL_SCANCODE_Q]            = keycode_normal(1,  1);
+		map[SDL_SCANCODE_W]            = keycode_normal(1,  2);
+		map[SDL_SCANCODE_E]            = keycode_normal(1,  3);
+		map[SDL_SCANCODE_R]            = keycode_normal(1,  4);
+		map[SDL_SCANCODE_T]            = keycode_normal(1,  5);
+		map[SDL_SCANCODE_Y]            = keycode_normal(1,  6);
+		map[SDL_SCANCODE_U]            = keycode_normal(1,  7);
+		map[SDL_SCANCODE_I]            = keycode_normal(1,  8);
+		map[SDL_SCANCODE_O]            = keycode_normal(1,  9);
+		map[SDL_SCANCODE_P]            = keycode_normal(1, 10);
+		map[SDL_SCANCODE_LEFTBRACKET]  = keycode_normal(1, 11);
 		map[SDL_SCANCODE_RIGHTBRACKET] = keycode_normal(1, 12);
-		map[SDL_SCANCODE_CAPSLOCK] = keycode_normal(2,  0);
-		map[SDL_SCANCODE_A] = keycode_normal(2,  1);
-		map[SDL_SCANCODE_S] = keycode_normal(2,  2);
-		map[SDL_SCANCODE_D] = keycode_normal(2,  3);
-		map[SDL_SCANCODE_F] = keycode_normal(2,  4);
-		map[SDL_SCANCODE_G] = keycode_normal(2,  5);
-		map[SDL_SCANCODE_H] = keycode_normal(2,  6);
-		map[SDL_SCANCODE_J] = keycode_normal(2,  7);
-		map[SDL_SCANCODE_K] = keycode_normal(2,  8);
-		map[SDL_SCANCODE_L] = keycode_normal(2,  9);
-		map[SDL_SCANCODE_SEMICOLON] = keycode_normal(2, 10);
+
+		map[SDL_SCANCODE_CAPSLOCK]   = keycode_normal(2,  0);
+		map[SDL_SCANCODE_A]          = keycode_normal(2,  1);
+		map[SDL_SCANCODE_S]          = keycode_normal(2,  2);
+		map[SDL_SCANCODE_D]          = keycode_normal(2,  3);
+		map[SDL_SCANCODE_F]          = keycode_normal(2,  4);
+		map[SDL_SCANCODE_G]          = keycode_normal(2,  5);
+		map[SDL_SCANCODE_H]          = keycode_normal(2,  6);
+		map[SDL_SCANCODE_J]          = keycode_normal(2,  7);
+		map[SDL_SCANCODE_K]          = keycode_normal(2,  8);
+		map[SDL_SCANCODE_L]          = keycode_normal(2,  9);
+		map[SDL_SCANCODE_SEMICOLON]  = keycode_normal(2, 10);
 		map[SDL_SCANCODE_APOSTROPHE] = keycode_normal(2, 11);
-		map[SDL_SCANCODE_BACKSLASH] = keycode_normal(2, 12);
-		map[SDL_SCANCODE_RETURN] = keycode_normal(2, 13);
-		map[SDL_SCANCODE_LSHIFT] = keycode_normal(3,  0);
+		map[SDL_SCANCODE_BACKSLASH]  = keycode_normal(2, 12);
+		map[SDL_SCANCODE_RETURN]     = keycode_normal(2, 13);
+
+		map[SDL_SCANCODE_LSHIFT]         = keycode_normal(3,  0);
 		map[SDL_SCANCODE_NONUSBACKSLASH] = keycode_normal(3,  1);
-		map[SDL_SCANCODE_Z] = keycode_normal(3,  2);
-		map[SDL_SCANCODE_X] = keycode_normal(3,  3);
-		map[SDL_SCANCODE_C] = keycode_normal(3,  4);
-		map[SDL_SCANCODE_V] = keycode_normal(3,  5);
-		map[SDL_SCANCODE_B] = keycode_normal(3,  6);
-		map[SDL_SCANCODE_N] = keycode_normal(3,  7);
-		map[SDL_SCANCODE_M] = keycode_normal(3,  8);
-		map[SDL_SCANCODE_COMMA] = keycode_normal(3,  9);
-		map[SDL_SCANCODE_PERIOD] = keycode_normal(3, 10);
-		map[SDL_SCANCODE_SLASH] = keycode_normal(3, 11);
-		map[SDL_SCANCODE_RSHIFT] = keycode_normal(3, 12);
-		map[SDL_SCANCODE_LCTRL] = keycode_normal(4,  0);
-		map[SDL_SCANCODE_LGUI] = keycode_normal(4,  1);
-		map[SDL_SCANCODE_LALT] = keycode_normal(4,  2);
-		map[SDL_SCANCODE_SPACE] = keycode_normal(4,  3);
-		map[SDL_SCANCODE_RALT] = keycode_normal(4,  5);
-		map[SDL_SCANCODE_RCTRL] = keycode_normal(4,  6);
+		map[SDL_SCANCODE_Z]              = keycode_normal(3,  2);
+		map[SDL_SCANCODE_X]              = keycode_normal(3,  3);
+		map[SDL_SCANCODE_C]              = keycode_normal(3,  4);
+		map[SDL_SCANCODE_V]              = keycode_normal(3,  5);
+		map[SDL_SCANCODE_B]              = keycode_normal(3,  6);
+		map[SDL_SCANCODE_N]              = keycode_normal(3,  7);
+		map[SDL_SCANCODE_M]              = keycode_normal(3,  8);
+		map[SDL_SCANCODE_COMMA]          = keycode_normal(3,  9);
+		map[SDL_SCANCODE_PERIOD]         = keycode_normal(3, 10);
+		map[SDL_SCANCODE_SLASH]          = keycode_normal(3, 11);
+		map[SDL_SCANCODE_RSHIFT]         = keycode_normal(3, 12);
 
-		map[SDL_SCANCODE_UP] = keycode_normal(5,  0);
-		map[SDL_SCANCODE_LEFT] = keycode_normal(5,  1);
-		map[SDL_SCANCODE_DOWN] = keycode_normal(5,  2);
-		map[SDL_SCANCODE_RIGHT] = keycode_normal(5,  3);
+		map[SDL_SCANCODE_LCTRL] = keycode_normal(4, 0);
+		map[SDL_SCANCODE_LGUI]  = keycode_normal(4, 1);
+		map[SDL_SCANCODE_LALT]  = keycode_normal(4, 2);
+		map[SDL_SCANCODE_SPACE] = keycode_normal(4, 3);
+		map[SDL_SCANCODE_RALT]  = keycode_normal(4, 4);
+		map[SDL_SCANCODE_RCTRL] = keycode_normal(4, 5);
 
-		map[SDL_SCANCODE_ESCAPE]  = keycode_function(0);
-		map[SDL_SCANCODE_F1]  = keycode_function(1);
-		map[SDL_SCANCODE_F2]  = keycode_function(2);
-		map[SDL_SCANCODE_F3]  = keycode_function(3);
-		map[SDL_SCANCODE_F4]  = keycode_function(4);
-		map[SDL_SCANCODE_F5]  = keycode_function(5);
-		map[SDL_SCANCODE_F6]  = keycode_function(6);
-		map[SDL_SCANCODE_F7]  = keycode_function(7);
-		map[SDL_SCANCODE_F8]  = keycode_function(8);
-		map[SDL_SCANCODE_F9]  = keycode_function(9);
-		map[SDL_SCANCODE_F10] = keycode_function(10);
-		map[SDL_SCANCODE_F11] = keycode_function(11);
-		map[SDL_SCANCODE_F12] = keycode_function(12);
-		map[SDL_SCANCODE_INSERT] = keycode_function(13);
+		map[SDL_SCANCODE_UP]    = keycode_normal(5, 0);
+		map[SDL_SCANCODE_LEFT]  = keycode_normal(5, 1);
+		map[SDL_SCANCODE_DOWN]  = keycode_normal(5, 2);
+		map[SDL_SCANCODE_RIGHT] = keycode_normal(5, 3);
+
+		map[SDL_SCANCODE_ESCAPE]      = keycode_function(0);
+		map[SDL_SCANCODE_F1]          = keycode_function(1);
+		map[SDL_SCANCODE_F2]          = keycode_function(2);
+		map[SDL_SCANCODE_F3]          = keycode_function(3);
+		map[SDL_SCANCODE_F4]          = keycode_function(4);
+		map[SDL_SCANCODE_F5]          = keycode_function(5);
+		map[SDL_SCANCODE_F6]          = keycode_function(6);
+		map[SDL_SCANCODE_F7]          = keycode_function(7);
+		map[SDL_SCANCODE_F8]          = keycode_function(8);
+		map[SDL_SCANCODE_F9]          = keycode_function(9);
+		map[SDL_SCANCODE_F10]         = keycode_function(10);
+		map[SDL_SCANCODE_F11]         = keycode_function(11);
+		map[SDL_SCANCODE_F12]         = keycode_function(12);
+		map[SDL_SCANCODE_INSERT]      = keycode_function(13);
 		map[SDL_SCANCODE_PRINTSCREEN] = keycode_function(14);
-		map[SDL_SCANCODE_DELETE] = keycode_function(15);
-		map[SDL_SCANCODE_HOME] = keycode_function(16);
-		map[SDL_SCANCODE_END] = keycode_function(17);
-		map[SDL_SCANCODE_PAGEUP] = keycode_function(18);
-		map[SDL_SCANCODE_PAGEDOWN] = keycode_function(19);
-		map[SDL_SCANCODE_SCROLLLOCK] = keycode_function(20);
+		map[SDL_SCANCODE_DELETE]      = keycode_function(15);
+		map[SDL_SCANCODE_HOME]        = keycode_function(16);
+		map[SDL_SCANCODE_END]         = keycode_function(17);
+		map[SDL_SCANCODE_PAGEUP]      = keycode_function(18);
+		map[SDL_SCANCODE_PAGEDOWN]    = keycode_function(19);
+		map[SDL_SCANCODE_SCROLLLOCK]  = keycode_function(20);
 
 		map[SDL_SCANCODE_NUMLOCKCLEAR] = keycode_numpad(0, 0);
-		map[SDL_SCANCODE_KP_DIVIDE] = keycode_numpad(0, 1);
-		map[SDL_SCANCODE_KP_MULTIPLY] = keycode_numpad(0, 2);
-		map[SDL_SCANCODE_KP_MINUS] = keycode_numpad(0, 3);
-		map[SDL_SCANCODE_KP_7] = keycode_numpad(1, 0);
-		map[SDL_SCANCODE_KP_8] = keycode_numpad(1, 1);
-		map[SDL_SCANCODE_KP_9] = keycode_numpad(1, 2);
-		map[SDL_SCANCODE_KP_PLUS] = keycode_numpad(1, 3);
-		map[SDL_SCANCODE_KP_4] = keycode_numpad(2, 0);
-		map[SDL_SCANCODE_KP_5] = keycode_numpad(2, 1);
-		map[SDL_SCANCODE_KP_6] = keycode_numpad(2, 2);
-		map[SDL_SCANCODE_KP_1] = keycode_numpad(3, 0);
-		map[SDL_SCANCODE_KP_2] = keycode_numpad(3, 1);
-		map[SDL_SCANCODE_KP_3] = keycode_numpad(3, 2);
-		map[SDL_SCANCODE_KP_ENTER] = keycode_numpad(3, 3);
-		map[SDL_SCANCODE_KP_0] = keycode_numpad(4, 0);
-		map[SDL_SCANCODE_KP_COMMA] = keycode_numpad(4, 1);
+		map[SDL_SCANCODE_KP_DIVIDE]    = keycode_numpad(0, 1);
+		map[SDL_SCANCODE_KP_MULTIPLY]  = keycode_numpad(0, 2);
+		map[SDL_SCANCODE_KP_MINUS]     = keycode_numpad(0, 3);
+		map[SDL_SCANCODE_KP_7]         = keycode_numpad(1, 0);
+		map[SDL_SCANCODE_KP_8]         = keycode_numpad(1, 1);
+		map[SDL_SCANCODE_KP_9]         = keycode_numpad(1, 2);
+		map[SDL_SCANCODE_KP_PLUS]      = keycode_numpad(1, 3);
+		map[SDL_SCANCODE_KP_4]         = keycode_numpad(2, 0);
+		map[SDL_SCANCODE_KP_5]         = keycode_numpad(2, 1);
+		map[SDL_SCANCODE_KP_6]         = keycode_numpad(2, 2);
+		map[SDL_SCANCODE_KP_1]         = keycode_numpad(3, 0);
+		map[SDL_SCANCODE_KP_2]         = keycode_numpad(3, 1);
+		map[SDL_SCANCODE_KP_3]         = keycode_numpad(3, 2);
+		map[SDL_SCANCODE_KP_ENTER]     = keycode_numpad(3, 3);
+		map[SDL_SCANCODE_KP_0]         = keycode_numpad(4, 0);
+		map[SDL_SCANCODE_KP_COMMA]     = keycode_numpad(4, 1);
 	};
 
 	uint8_t map[SDL_NUM_SCANCODES];
@@ -326,6 +322,7 @@ int main()
 		SIGTSTP,
 		SIGTTIN,
 		SIGTTOU,
+		SIGWINCH,
 	};
 	constexpr int ignored_signals[] {
 		SIGPIPE,

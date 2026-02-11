@@ -1375,27 +1375,27 @@ void WindowServer::remove_client_fd(int fd)
 	for (size_t i = 0; i < m_client_windows.size(); i++)
 	{
 		auto window = m_client_windows[i];
-		if (window->client_fd() == fd)
+		if (window->client_fd() != fd)
+			continue;
+
+		auto window_area = window->full_area();
+		m_client_windows.remove(i);
+		invalidate(window_area);
+
+		if (window != m_focused_window)
+			break;
+
+		m_focused_window = nullptr;
+		for (size_t j = m_client_windows.size(); j > 0; j--)
 		{
-			auto window_area = window->full_area();
-			m_client_windows.remove(i);
-			invalidate(window_area);
-
-			if (window == m_focused_window)
-			{
-				m_focused_window = nullptr;
-				for (size_t j = m_client_windows.size(); j > 0; j--)
-				{
-					auto& client_window = m_client_windows[j - 1];
-					if (!client_window->get_attributes().focusable)
-						continue;
-					set_focused_window(client_window);
-					break;
-				}
-			}
-
+			auto& client_window = m_client_windows[j - 1];
+			if (!client_window->get_attributes().focusable)
+				continue;
+			set_focused_window(client_window);
 			break;
 		}
+
+		break;
 	}
 }
 

@@ -128,8 +128,6 @@ namespace LibInput
 		strncpy(null_path, path.data(), path.size());
 		null_path[path.size()] = '\0';
 
-		printf("opening '%s'\n", null_path);
-
 		struct stat st;
 		if (stat(null_path, &st) == -1)
 			return BAN::Error::from_errno(errno);

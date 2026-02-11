@@ -31,5 +31,5 @@ inline BAN::ErrorOr<void> encode(BAN::Vector<uint8_t>& buffer, const T& value)
 template<typename T> requires requires(T value) { value.size(); value.data(); }
 inline BAN::ErrorOr<void> encode(BAN::Vector<uint8_t>& buffer, const T& value)
 {
-	return encode_bytes(buffer, value.data(), value.size());
+	return encode_bytes(buffer, value.data(), value.size() * sizeof(typename T::value_type));
 }

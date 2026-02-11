@@ -37,12 +37,22 @@ struct Object
 	enum class Type
 	{
 		Visual,
+		Cursor,
 		Window,
 		Pixmap,
 		GraphicsContext,
 	};
 
 	Type type;
+
+	struct Cursor
+	{
+		uint32_t width;
+		uint32_t height;
+		int32_t origin_x;
+		int32_t origin_y;
+		BAN::Vector<uint32_t> pixels;
+	};
 
 	struct Window
 	{
@@ -54,6 +64,7 @@ struct Object
 		int32_t cursor_y { -1 };
 		uint32_t event_mask { 0 };
 		WINDOW parent;
+		CURSOR cursor;
 		CARD16 c_class;
 		BAN::Vector<WINDOW> children;
 		BAN::Variant<
@@ -96,7 +107,7 @@ struct Object
 		uint32_t background;
 	};
 
-	BAN::Variant<Window, Pixmap, GraphicsContext> object;
+	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext> object;
 };
 
 struct Client
@@ -128,7 +139,7 @@ struct EpollThingy
 	BAN::Variant<Client, LibGUI::Window*> value;
 };
 
-extern const xPixmapFormat g_formats[5];
+extern const xPixmapFormat g_formats[6];
 extern const xWindowRoot g_root;
 extern const xDepth g_depth;
 extern const xVisualType g_visual;

@@ -1,12 +1,12 @@
 #include "Base.h"
 #include "Definitions.h"
 #include "Extensions.h"
+#include "Keymap.h"
 #include "Utils.h"
 
 #include <X11/X.h>
 #include <X11/Xatom.h>
 
-#include <time.h>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
@@ -19,20 +19,25 @@
 #include <netinet/in.h>
 #endif
 
-const xPixmapFormat g_formats[] {
+const xPixmapFormat g_formats[6] {
 	{
 		.depth = 1,
-		.bitsPerPixel = 32,
+		.bitsPerPixel = 1,
 		.scanLinePad = 32,
 	},
 	{
 		.depth = 4,
-		.bitsPerPixel = 32,
+		.bitsPerPixel = 4,
 		.scanLinePad = 32,
 	},
 	{
 		.depth = 8,
-		.bitsPerPixel = 32,
+		.bitsPerPixel = 8,
+		.scanLinePad = 32,
+	},
+	{
+		.depth = 16,
+		.bitsPerPixel = 16,
 		.scanLinePad = 32,
 	},
 	{
@@ -56,7 +61,7 @@ const xVisualType g_visual {
 	.visualID = 1,
 	.c_class = TrueColor,
 	.bitsPerRGB = 8,
-	.colormapEntries = 0,
+	.colormapEntries = 256,
 	.redMask = 0xFF0000,
 	.greenMask = 0x00FF00,
 	.blueMask = 0x0000FF,
@@ -72,8 +77,8 @@ const xWindowRoot g_root {
 	.pixHeight = 800,
 	.mmWidth = 1280,
 	.mmHeight = 800,
-	.minInstalledMaps = 0,
-	.maxInstalledMaps = 0,
+	.minInstalledMaps = 1,
+	.maxInstalledMaps = 1,
 	.rootVisualID = g_visual.visualID,
 	.backingStore = 0,
 	.saveUnders = 0,
@@ -124,13 +129,13 @@ int main()
 		if (sig != SIGWINCH)
 			signal(sig, exit);
 
+#if USE_UNIX_SOCKET
 	if (mkdir("/tmp/.X11-unix", 01777) == -1 && errno != EEXIST)
 	{
 		perror("xbanan: mkdir");
 		return 1;
 	}
 
-#if USE_UNIX_SOCKET
 	int server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
 #else
 	int server_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -261,6 +266,8 @@ int main()
 	APPEND_ATOM(XA_WM_CLASS);
 	APPEND_ATOM(XA_WM_TRANSIENT_FOR);
 #undef APPEND_ATOM
+
+	MUST(initialize_keymap());
 
 	install_extension("BIG-REQUESTS"_sv, extension_bigrequests);
 

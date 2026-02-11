@@ -3,6 +3,7 @@ set(SOURCES
 	Base.cpp
 	Extensions.cpp
 	ExtRANDR.cpp
+	Keymap.cpp
 )
 
 add_executable(xbanan ${SOURCES})

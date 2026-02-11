@@ -1,10 +1,9 @@
 #include "Definitions.h"
 #include "Extensions.h"
+#include "Keymap.h"
 #include "Utils.h"
 
 #include <X11/X.h>
-#include <X11/Xatom.h>
-#include <X11/keysym.h>
 
 #include <time.h>
 #include <sys/epoll.h>
@@ -17,168 +16,12 @@ struct Selection
 
 static BAN::HashMap<ATOM, Selection> g_selections;
 
-static WINDOW g_focus_window { None };
+static CARD16 s_keymask { 0 };
+static CARD16 s_butmask { 0 };
 
-static struct Keymap
-{
-	consteval Keymap()
-	{
-		for (auto& sym : map)
-			sym = XK_VoidSymbol;
+static WINDOW s_focus_window { None };
 
-		using LibInput::Key;
-		map[(size_t)Key::A] = XK_A;
-		map[(size_t)Key::B] = XK_B;
-		map[(size_t)Key::C] = XK_C;
-		map[(size_t)Key::D] = XK_D;
-		map[(size_t)Key::E] = XK_E;
-		map[(size_t)Key::F] = XK_F;
-		map[(size_t)Key::G] = XK_G;
-		map[(size_t)Key::H] = XK_H;
-		map[(size_t)Key::I] = XK_I;
-		map[(size_t)Key::J] = XK_J;
-		map[(size_t)Key::K] = XK_K;
-		map[(size_t)Key::L] = XK_L;
-		map[(size_t)Key::M] = XK_M;
-		map[(size_t)Key::N] = XK_N;
-		map[(size_t)Key::O] = XK_O;
-		map[(size_t)Key::P] = XK_P;
-		map[(size_t)Key::Q] = XK_Q;
-		map[(size_t)Key::R] = XK_R;
-		map[(size_t)Key::S] = XK_S;
-		map[(size_t)Key::T] = XK_T;
-		map[(size_t)Key::U] = XK_U;
-		map[(size_t)Key::V] = XK_V;
-		map[(size_t)Key::W] = XK_W;
-		map[(size_t)Key::X] = XK_X;
-		map[(size_t)Key::Y] = XK_Y;
-		map[(size_t)Key::Z] = XK_Z;
-		map[(size_t)Key::A_Ring] = XK_Aring;
-		map[(size_t)Key::A_Umlaut] = XK_Adiaeresis;
-		map[(size_t)Key::O_Umlaut] = XK_Odiaeresis;
-		map[(size_t)Key::_0] = XK_0;
-		map[(size_t)Key::_1] = XK_1;
-		map[(size_t)Key::_2] = XK_2;
-		map[(size_t)Key::_3] = XK_3;
-		map[(size_t)Key::_4] = XK_4;
-		map[(size_t)Key::_5] = XK_5;
-		map[(size_t)Key::_6] = XK_6;
-		map[(size_t)Key::_7] = XK_7;
-		map[(size_t)Key::_8] = XK_8;
-		map[(size_t)Key::_9] = XK_9;
-		map[(size_t)Key::F1] = XK_F1;
-		map[(size_t)Key::F2] = XK_F2;
-		map[(size_t)Key::F3] = XK_F3;
-		map[(size_t)Key::F4] = XK_F4;
-		map[(size_t)Key::F5] = XK_F5;
-		map[(size_t)Key::F6] = XK_F6;
-		map[(size_t)Key::F7] = XK_F7;
-		map[(size_t)Key::F8] = XK_F8;
-		map[(size_t)Key::F9] = XK_F9;
-		map[(size_t)Key::F10] = XK_F10;
-		map[(size_t)Key::F11] = XK_F11;
-		map[(size_t)Key::F12] = XK_F12;
-		map[(size_t)Key::Insert] = XK_Insert;
-		map[(size_t)Key::PrintScreen] = XK_Print;
-		map[(size_t)Key::Delete] = XK_Delete;
-		map[(size_t)Key::Home] = XK_Home;
-		map[(size_t)Key::End] = XK_End;
-		map[(size_t)Key::PageUp] = XK_Page_Up;
-		map[(size_t)Key::PageDown] = XK_Page_Down;
-		map[(size_t)Key::Enter] = XK_Return;
-		map[(size_t)Key::Space] = XK_space;
-		map[(size_t)Key::ExclamationMark] = XK_exclam;
-		map[(size_t)Key::DoubleQuote] = XK_quotedbl;
-		map[(size_t)Key::Hashtag] = XK_numbersign;
-		map[(size_t)Key::Currency] = XK_currency;
-		map[(size_t)Key::Percent] = XK_percent;
-		map[(size_t)Key::Ampersand] = XK_ampersand;
-		map[(size_t)Key::Slash] = XK_slash;
-		map[(size_t)Key::Section] = XK_section;
-		map[(size_t)Key::Half] = XK_onehalf;
-		map[(size_t)Key::OpenParenthesis] = ')';
-		map[(size_t)Key::CloseParenthesis] = '(';
-		map[(size_t)Key::OpenSquareBracket] = '[';
-		map[(size_t)Key::CloseSquareBracket] = ']';
-		map[(size_t)Key::OpenCurlyBracket] = '{';
-		map[(size_t)Key::CloseCurlyBracket] = '}';
-		map[(size_t)Key::Equals] = '=';
-		map[(size_t)Key::QuestionMark] = '?';
-		map[(size_t)Key::Plus] = '+';
-		map[(size_t)Key::BackSlash] = '\\';
-		map[(size_t)Key::Acute] = XK_acute;
-		map[(size_t)Key::BackTick] = '`';
-		map[(size_t)Key::TwoDots] = XK_diaeresis;
-		map[(size_t)Key::Cedilla] = XK_Ccedilla;
-		map[(size_t)Key::Backspace] = XK_BackSpace;
-		map[(size_t)Key::AtSign] = XK_at;
-		map[(size_t)Key::Pound] = XK_sterling;
-		map[(size_t)Key::Dollar] = XK_dollar;
-		map[(size_t)Key::Euro] = XK_EuroSign;
-		map[(size_t)Key::Escape] = XK_Escape;
-		map[(size_t)Key::Tab] = XK_Tab;
-		map[(size_t)Key::CapsLock] = XK_Caps_Lock;
-		map[(size_t)Key::LeftShift] = XK_Shift_L;
-		map[(size_t)Key::LeftCtrl] = XK_Control_L;
-		map[(size_t)Key::Super] = XK_Super_L;
-		map[(size_t)Key::LeftAlt] = XK_Alt_L;
-		map[(size_t)Key::RightAlt] = XK_Alt_R;
-		map[(size_t)Key::RightCtrl] = XK_Control_R;
-		map[(size_t)Key::RightShift] = XK_Shift_R;
-		map[(size_t)Key::SingleQuote] = '\'';
-		map[(size_t)Key::Asterix] = '*';
-		map[(size_t)Key::Caret] = '^';
-		map[(size_t)Key::Tilde] = '~';
-		map[(size_t)Key::ArrowUp] = XK_Up;
-		map[(size_t)Key::ArrowDown] = XK_Down;
-		map[(size_t)Key::ArrowLeft] = XK_Left;
-		map[(size_t)Key::ArrowRight] = XK_Right;
-		map[(size_t)Key::Comma] = ',';
-		map[(size_t)Key::Semicolon] = ';';
-		map[(size_t)Key::Period] = '.';
-		map[(size_t)Key::Colon] = ':';
-		map[(size_t)Key::Hyphen] = '-';
-		map[(size_t)Key::Underscore] = '_';
-		map[(size_t)Key::NumLock] = XK_Num_Lock;
-		map[(size_t)Key::ScrollLock] = XK_Scroll_Lock;
-		map[(size_t)Key::LessThan] = '<';
-		map[(size_t)Key::GreaterThan] = '>';
-		map[(size_t)Key::Pipe] = '|';
-		map[(size_t)Key::Negation] = XK_notsign;
-		map[(size_t)Key::BrokenBar] = XK_brokenbar;
-		map[(size_t)Key::Numpad0] = XK_KP_0;
-		map[(size_t)Key::Numpad1] = XK_KP_1;
-		map[(size_t)Key::Numpad2] = XK_KP_2;
-		map[(size_t)Key::Numpad3] = XK_KP_3;
-		map[(size_t)Key::Numpad4] = XK_KP_4;
-		map[(size_t)Key::Numpad5] = XK_KP_5;
-		map[(size_t)Key::Numpad6] = XK_KP_6;
-		map[(size_t)Key::Numpad7] = XK_KP_7;
-		map[(size_t)Key::Numpad8] = XK_KP_8;
-		map[(size_t)Key::Numpad9] = XK_KP_9;
-		map[(size_t)Key::NumpadPlus] = XK_KP_Add;
-		map[(size_t)Key::NumpadMinus] = XK_KP_Subtract;
-		map[(size_t)Key::NumpadMultiply] = XK_KP_Multiply;
-		map[(size_t)Key::NumpadDivide] = XK_KP_Divide;
-		map[(size_t)Key::NumpadEnter] = XK_KP_Enter;
-		map[(size_t)Key::NumpadDecimal] = XK_KP_Decimal;
-#if 0
-		map[(size_t)Key::VolumeMute] = XF8_mute;
-		map[(size_t)Key::VolumeUp] = XK_VolumeUp;
-		map[(size_t)Key::VolumeDown] = XK_VolumeDown;
-		map[(size_t)Key::Calculator] = XK_Calculator;
-		map[(size_t)Key::MediaPlayPause] = XK_MediaPlayPause;
-		map[(size_t)Key::MediaStop] = XK_MediaStop;
-		map[(size_t)Key::MediaPrevious] = XK_MediaPrevious;
-		map[(size_t)Key::MediaNext] = XK_MediaNext;
-#endif
-	}
-
-	static constexpr size_t size = static_cast<size_t>(LibInput::Key::Count);
-	KeySym map[size];
-} g_keymap;
-
-static const char* opcode_to_name[] {
+static const char* s_opcode_to_name[] {
 	[0] = "none",
 	[X_CreateWindow] = "X_CreateWindow",
 	[X_ChangeWindowAttributes] = "X_ChangeWindowAttributes",
@@ -346,12 +189,12 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 		.maxRequestSize = 0xFFFF,
 		.numRoots = 1,
 		.numFormats = format_count,
-		.imageByteOrder = 0, // LSB
-		.bitmapBitOrder = 0, // LSB
-		.bitmapScanlineUnit = 0,
-		.bitmapScanlinePad = 0,
-		.minKeyCode = 1,
-		.maxKeyCode = g_keymap.size,
+		.imageByteOrder = LSBFirst,
+		.bitmapBitOrder = LSBFirst,
+		.bitmapScanlineUnit = 32,
+		.bitmapScanlinePad = 32,
+		.minKeyCode = g_keymap_min_keycode,
+		.maxKeyCode = g_keymap_max_keycode,
 	};
 
 	TRY(encode(client_info.output_buffer, setup));
@@ -379,6 +222,17 @@ static bool is_visible(WINDOW wid)
 		return false;
 
 	return is_visible(window.parent);
+}
+
+static Object::Cursor& get_cursor_safe(CURSOR cid)
+{
+	static Object::Cursor dummy {};
+	auto it = g_objects.find(cid);
+	if (it == g_objects.end())
+		return dummy;
+	if (it->value->type != Object::Type::Cursor)
+		return dummy;
+	return it->value->object.get<Object::Cursor>();
 }
 
 static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info, WINDOW wid, bool visible)
@@ -810,6 +664,8 @@ static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
 
 static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
 {
+	// FIXME: correct event_x and event_y values in events
+
 	const auto old_child_path = get_path_to_child(wid, old_x, old_y);
 	const auto new_child_path = get_path_to_child(wid, new_x, new_y);
 
@@ -826,7 +682,21 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 
 	const bool linear = (common_ancestors == old_child_path.size() || common_ancestors == new_child_path.size());
 
-	for (size_t i = 0; i < old_child_path.size() - common_ancestors; i++)
+	const auto get_flags =
+		[](WINDOW wid) -> BYTE
+		{
+			return ELFlagSameScreen | (s_focus_window == wid ? ELFlagFocus : 0);
+		};
+
+	size_t leave_events = old_child_path.size() - common_ancestors;
+	if (linear && common_ancestors && old_child_path.size() < new_child_path.size())
+		leave_events++;
+
+	size_t enter_events = new_child_path.size() - common_ancestors;
+	if (linear && common_ancestors && new_child_path.size() < old_child_path.size())
+		enter_events++;
+
+	for (size_t i = 0; i < leave_events; i++)
 	{
 		const bool first = (i == 0);
 		const BYTE detail =
@@ -835,9 +705,9 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 					return first ? NotifyNonlinear : NotifyNonlinearVirtual;
 				if (!first)
 					return NotifyVirtual;
-				if (old_child_path.size() > new_child_path.size())
-					return NotifyAncestor;
-				return NotifyInferior;
+				return (old_child_path.size() > new_child_path.size())
+					? NotifyAncestor
+					: NotifyInferior;
 			}();
 
 		const auto& wid = old_child_path[old_child_path.size() - i - 1];
@@ -855,11 +725,12 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 				.event = wid,
 				.child = first ? static_cast<WINDOW>(None) : old_child_path.back(),
 				.rootX = static_cast<INT16>(old_x),
-				.rootY = static_cast<INT16>(old_x),
+				.rootY = static_cast<INT16>(old_y),
 				.eventX = static_cast<INT16>(old_x),
-				.eventY = static_cast<INT16>(old_x),
-				.state = 0,
+				.eventY = static_cast<INT16>(old_y),
+				.state = static_cast<KeyButMask>(s_keymask | s_butmask),
 				.mode = NotifyNormal,
+				.flags = get_flags(wid),
 			}
 		}};
 		xevent.u.u.type = LeaveNotify,
@@ -868,21 +739,21 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 		MUST(encode(client_info.output_buffer, xevent));
 	}
 
-	for (size_t i = 0; i < new_child_path.size() - common_ancestors; i++)
+	for (size_t i = 0; i < enter_events; i++)
 	{
-		const bool last = (i == new_child_path.size() - common_ancestors - 1);
+		const bool last = (i == enter_events - 1);
 		const BYTE detail =
 			[&]() -> BYTE {
 				if (!linear)
 					return last ? NotifyNonlinear : NotifyNonlinearVirtual;
 				if (!last)
 					return NotifyVirtual;
-				if (old_child_path.size() > new_child_path.size())
-					return NotifyInferior;
-				return NotifyAncestor;
+				return (old_child_path.size() > new_child_path.size())
+					? NotifyInferior
+					: NotifyAncestor;
 			}();
 
-		const auto& wid = new_child_path[common_ancestors + i];
+		const auto& wid = new_child_path[new_child_path.size() - enter_events + i];
 
 		auto& object = *g_objects[wid];
 		ASSERT(object.type == Object::Type::Window);
@@ -896,12 +767,13 @@ static void send_enter_and_leave_events(Client& client_info, WINDOW wid, int32_t
 				.root = g_root.windowId,
 				.event = wid,
 				.child = last ? static_cast<WINDOW>(None) : new_child_path.back(),
-				.rootX = static_cast<INT16>(old_x),
-				.rootY = static_cast<INT16>(old_x),
-				.eventX = static_cast<INT16>(old_x),
-				.eventY = static_cast<INT16>(old_x),
-				.state = 0,
+				.rootX = static_cast<INT16>(new_x),
+				.rootY = static_cast<INT16>(new_y),
+				.eventX = static_cast<INT16>(new_x),
+				.eventY = static_cast<INT16>(new_y),
+				.state = static_cast<KeyButMask>(s_keymask | s_butmask),
 				.mode = NotifyNormal,
+				.flags = get_flags(wid),
 			}
 		}};
 		xevent.u.u.type = EnterNotify,
@@ -1000,7 +872,7 @@ static void on_window_resize_event(Client& client_info, WINDOW wid)
 static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
 {
 	if (focused)
-		g_focus_window = wid;
+		s_focus_window = wid;
 
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
@@ -1028,22 +900,22 @@ static void on_window_focus_event(Client& client_info, WINDOW wid, bool focused)
 	MUST(encode(client_info.output_buffer, xevent));
 }
 
-static void send_key_button_pointer_event(Client& client_info, WINDOW wid, KeyButMask state, BYTE detail, uint32_t event_mask, BYTE event_type)
+static void send_key_button_pointer_event(Client& client_info, WINDOW root_wid, BYTE detail, uint32_t event_mask, BYTE event_type)
 {
 	int32_t root_x, root_y;
 	int32_t event_x, event_y;
 
 	{
-		auto& object = *g_objects[wid];
+		auto& object = *g_objects[root_wid];
 		ASSERT(object.type == Object::Type::Window);
 		auto& window = object.object.get<Object::Window>();
 		root_x = event_x = window.cursor_x;
 		root_y = event_y = window.cursor_y;
 	}
 
-	const auto child_wid = find_child_window(wid, event_x, event_y);
-	wid = child_wid;
+	const auto child_wid = find_child_window(root_wid, event_x, event_y);
 
+	auto wid = child_wid;
 	while (wid != None)
 	{
 		auto& object = *g_objects[wid];
@@ -1058,7 +930,11 @@ static void send_key_button_pointer_event(Client& client_info, WINDOW wid, KeyBu
 	}
 
 	if (wid == None)
-		return;
+	{
+		if (event_type == MotionNotify && s_butmask == 0)
+			return;
+		wid = root_wid;
+	}
 
 	xEvent xevent { .u = {
 		.keyButtonPointer = {
@@ -1070,7 +946,7 @@ static void send_key_button_pointer_event(Client& client_info, WINDOW wid, KeyBu
 			.rootY = static_cast<INT16>(root_y),
 			.eventX = static_cast<INT16>(event_x),
 			.eventY = static_cast<INT16>(event_y),
-			.state = state,
+			.state = static_cast<KeyButMask>(s_keymask | s_butmask),
 			.sameScreen = xTrue,
 		}
 	}};
@@ -1098,25 +974,68 @@ static void update_cursor_position_recursive(WINDOW wid, int32_t new_x, int32_t 
 	}
 }
 
+static void update_cursor(WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
+{
+	const auto old_wid = find_child_window(wid, old_x, old_y);
+	const auto new_wid = find_child_window(wid, new_x, new_y);
+	if (old_wid == new_wid || old_wid == None || new_wid == None)
+		return;
+
+	const auto& old_window = g_objects[old_wid]->object.get<Object::Window>();
+	const auto& new_window = g_objects[new_wid]->object.get<Object::Window>();
+	if (old_window.cursor == new_window.cursor)
+		return;
+
+	auto& window = g_objects[wid]->object.get<Object::Window>();
+	auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+
+	const auto& cursor = get_cursor_safe(window.cursor);
+	gui_window->set_cursor(cursor.width, cursor.height, cursor.pixels.span(), cursor.origin_x, cursor.origin_y);
+}
+
 static void on_mouse_move_event(Client& client_info, WINDOW wid, int32_t x, int32_t y)
 {
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 	auto& window = object.object.get<Object::Window>();
 
+	update_cursor(wid, window.cursor_x, window.cursor_y, x, y);
+
 	send_enter_and_leave_events(client_info, wid, window.cursor_x, window.cursor_y, x, y);
 
 	update_cursor_position_recursive(wid, x, y);
 
-	send_key_button_pointer_event(client_info, wid, 0, NotifyNormal, PointerMotionMask, MotionNotify);
+	// TODO: optimize with PointerMotionHint
+	uint32_t event_mask = PointerMotionMask | PointerMotionHintMask;
+	if (s_butmask) event_mask |= ButtonMotionMask;
+	if (s_butmask & Button1Mask) event_mask |= Button1MotionMask;
+	if (s_butmask & Button2Mask) event_mask |= Button2MotionMask;
+	if (s_butmask & Button3Mask) event_mask |= Button3MotionMask;
+	if (s_butmask & Button4Mask) event_mask |= Button4MotionMask;
+	if (s_butmask & Button5Mask) event_mask |= Button5MotionMask;
+	send_key_button_pointer_event(client_info, wid, NotifyNormal, event_mask, MotionNotify);
 }
 
 static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutton, bool pressed)
 {
+	uint16_t mask = 0;
+	switch (xbutton)
+	{
+		case Button1: mask = Button1Mask; break;
+		case Button2: mask = Button2Mask; break;
+		case Button3: mask = Button3Mask; break;
+		case Button4: mask = Button4Mask; break;
+		case Button5: mask = Button5Mask; break;
+	}
+
+	if (pressed)	
+		s_butmask |= mask;
+	else
+		s_butmask &= ~mask;
+
 	send_key_button_pointer_event(
 		client_info,
 		wid,
-		0,
 		xbutton,
 		pressed ? ButtonPressMask : ButtonReleaseMask,
 		pressed ? ButtonPress     : ButtonRelease
@@ -1125,22 +1044,27 @@ static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutt
 
 static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t event)
 {
-	if (g_keymap.map[static_cast<BYTE>(event.key)] == XK_VoidSymbol)
+	const uint8_t xkeycode = event.scancode + g_keymap_min_keycode;
+	if (xkeycode < g_keymap_min_keycode)
+	{
+		dwarnln("cannot send keycode {}", xkeycode);
 		return;
+	}
 
-	CARD8 xmodifier = 0;
+	s_keymask = 0;
 	if (event.shift())
-		xmodifier |= ShiftMask;
+		s_keymask |= ShiftMask;
 	if (event.caps_lock())
-		xmodifier |= LockMask;
+		s_keymask |= LockMask;
 	if (event.ctrl())
-		xmodifier |= ControlMask;
+		s_keymask |= ControlMask;
+	if (event.alt())
+		s_keymask |= Mod1Mask;
 
 	send_key_button_pointer_event(
 		client_info,
 		wid,
-		xmodifier,
-		static_cast<BYTE>(event.key),
+		xkeycode,
 		event.pressed() ? KeyPressMask : KeyReleaseMask,
 		event.pressed() ? KeyPress     : KeyRelease
 	);
@@ -1176,6 +1100,27 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			}
 
 			return it->value->object.get<Object::Window>();
+		};
+
+	const auto get_pixmap =
+		[&client_info, opcode](WINDOW wid) -> BAN::ErrorOr<Object::Pixmap&>
+		{
+			auto it = g_objects.find(wid);
+			if (it == g_objects.end() || it->value->type != Object::Type::Pixmap)
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = BadPixmap,
+					.sequenceNumber = client_info.sequence,
+					.resourceID = wid,
+					.minorCode = 0,
+					.majorCode = opcode,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				return BAN::Error::from_errno(ENOENT);
+			}
+
+			return it->value->object.get<Object::Pixmap>();
 		};
 
 	const auto get_drawable =
@@ -1295,7 +1240,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  mask:    {8h}", request.mask);
 
 			uint32_t event_mask { 0 };
-			uint32_t background { 0xFF00FF };
+			uint32_t background { 0x000000 };
+			CURSOR cursor_id = None;
 
 			for (size_t i = 0; i < 32; i++)
 			{
@@ -1316,7 +1262,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						break;
 					case 11:
 						event_mask = value;
-						derrorln("    events: {8h}", event_mask);
+						break;
+					case 14:
+						cursor_id = value;
 						break;
 					default:
 						dprintln("    {8h}: {8h}", 1 << i, value);
@@ -1335,12 +1283,17 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				auto attributes = LibGUI::Window::default_attributes;
 				attributes.shown = false;
 				attributes.title_bar = false;
-				attributes.alpha_channel = true;
 				attributes.resizable = true;
 
 				auto gui_window = TRY(LibGUI::Window::create(request.width, request.height, "window?"_sv, attributes));
 				gui_window->texture().set_bg_color(background);
 				gui_window_ptr = gui_window.ptr();
+
+				if (cursor_id != None)
+				{
+					const auto& cursor = get_cursor_safe(cursor_id);
+					gui_window->set_cursor(cursor.width, cursor.height, cursor.pixels.span(), cursor.origin_x, cursor.origin_y);
+				}
 
 				TRY(g_epoll_thingies.insert(gui_window->server_fd(), {
 					.type = EpollThingy::Type::Window,
@@ -1369,6 +1322,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						.y = request.y,
 						.event_mask = event_mask,
 						.parent = request.parent,
+						.cursor = cursor_id,
 						.c_class = request.c_class == CopyFromParent ? parent_window.c_class : request.c_class,
 						.window = BAN::move(window),
 					},
@@ -1441,6 +1395,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto& window = TRY_REF(get_window(request.window));
 
+			CURSOR cursor_id = None;
+
 			BAN::Optional<uint32_t> background;
 			for (size_t i = 0; i < 32; i++)
 			{
@@ -1461,12 +1417,29 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						break;
 					case 11:
 						window.event_mask = value;
-						derrorln("    events: {8h}", window.event_mask);
+						break;
+					case 14:
+						cursor_id = value;
 						break;
 					default:
 						dprintln("    {8h}: {8h}", 1 << i, value);
 						break;
 				}
+			}
+
+			if (window.cursor != cursor_id)
+			{
+				// FIXME: show cursor if wid is hovered
+
+				if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+				{
+					auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+
+					const auto& cursor = get_cursor_safe(cursor_id);
+					gui_window->set_cursor(cursor.width, cursor.height, cursor.pixels.span(), cursor.origin_x, cursor.origin_y);
+				}
+
+				window.cursor = cursor_id;
 			}
 
 			if (background.has_value())
@@ -1588,7 +1561,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			{
 				if (!(request.mask & (1 << i)))
 					continue;
-				uint16_t value = decode<uint16_t>(packet).value();
+				const uint16_t value = decode<uint16_t>(packet).value();
 				decode<int16_t>(packet).value();
 
 				switch (i)
@@ -1607,7 +1580,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						break;
 					case 11:
 						window.event_mask = value;
-						derrorln("    events: {8h}", window.event_mask);
 						break;
 					default:
 						dprintln("    {4h}: {4h}", 1 << i, value);
@@ -1761,10 +1733,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("QueryTree");
 			dprintln("  window: {}", wid);
 
-			const auto& object = *g_objects[wid];
-			ASSERT(object.type == Object::Type::Window);
-
-			const auto& window = object.object.get<Object::Window>();
+			const auto& window = TRY_REF(get_window(wid));
 
 			xQueryTreeReply reply {
 				.type = X_Reply,
@@ -1918,10 +1887,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  window:   {}", request.window);
 			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
 
-			auto& object = *g_objects[request.window];
-			ASSERT(object.type == Object::Type::Window);
-
-			auto& window = object.object.get<Object::Window>();
+			auto& window = TRY_REF(get_window(request.window));
 
 			auto it = window.properties.find(request.property);
 			if (it == window.properties.end())
@@ -1958,10 +1924,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  longOffset: {}", request.longOffset);
 			dprintln("  longLength: {}", request.longLength);
 
-			auto& object = *g_objects[request.window];
-			ASSERT(object.type == Object::Type::Window);
-
-			auto& window = object.object.get<Object::Window>();
+			auto& window = TRY_REF(get_window(request.window));
 
 			auto it = window.properties.find(request.property);
 			if (it == window.properties.end())
@@ -2256,7 +2219,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.rootY = static_cast<INT16>(root_y),
 				.winX = static_cast<INT16>(event_x),
 				.winY = static_cast<INT16>(event_y),
-				.mask = 0,
+				.mask = static_cast<KeyButMask>(s_keymask | s_butmask),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -2307,7 +2270,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.revertTo = None,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
-				.focus = g_focus_window,
+				.focus = s_focus_window,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -2734,7 +2697,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  height:   {}", request.height);
 #endif
 
-			auto& object = *g_objects[request.drawable];
+			auto& object = TRY_REF(get_drawable(request.drawable));
 			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
 
 			if (packet.empty())
@@ -2743,51 +2706,65 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				break;
 			}
 
-			auto* out_data_u32 = out_data.as_span<uint32_t>().data();
+			uint8_t bpp = 0;
+			for (const auto& format : g_formats)
+				if (format.depth == request.depth)
+					bpp = format.bitsPerPixel;
+			ASSERT(bpp && 32 % bpp == 0);
+
+			uint32_t (*get_pixel)(int32_t x, int32_t y, uint8_t bpp, uint32_t width, const uint32_t* data) = nullptr;
 
 			switch (request.format)
 			{
-				case 0:
-				{
-					for (int32_t y = 0; y < request.height; y++)
+				case XYBitmap:
+					ASSERT(request.depth == 1);
+					[[fallthrough]];
+				case ZPixmap:
+					if (bpp == 32)
 					{
-						const auto dst_y = request.dstY + y;
-						if (dst_y < 0 || dst_y >= out_h)
-							continue;
-						for (int32_t x = 0; x < request.width; x++)
-						{
-							const auto dst_x = request.dstX + x;
-							if (dst_x < 0 || dst_x >= out_w)
-								continue;
-							const auto bit_index = y * request.width + x;
-							const auto byte = bit_index / 8;
-							const auto bit = bit_index % 8;
-							out_data_u32[dst_y * out_w + dst_x] = (packet[byte] & (1 << bit)) ? 0xFFFFFF : 0x000000; 
-						}
+						get_pixel =
+							[](int32_t x, int32_t y, uint8_t bpp, uint32_t width, const uint32_t* data) -> uint32_t
+							{
+								(void)bpp;
+								return data[y * width + x];
+							};
+					}
+					else
+					{
+						get_pixel =
+							[](int32_t x, int32_t y, uint8_t bpp, uint32_t width, const uint32_t* data) -> uint32_t
+							{
+								const auto bits_per_scanline = (bpp * width + 31) / 32 * 32;
+								const auto bit_offset = y * bits_per_scanline + x * bpp;
+								const auto dword = bit_offset / 32;
+								const auto shift = bit_offset % 32;
+								const auto mask = (1u << bpp) - 1;
+								return (data[dword] >> shift) & mask;
+							};
 					}
 					break;
-				}
-				case 2:
-				{
-					auto* pixels_u32 = packet.as_span<const uint32_t>().data();
-					for (int32_t y = 0; y < request.height; y++)
-					{
-						const auto dst_y = request.dstY + y;
-						if (dst_y < 0 || dst_y >= out_h)
-							continue;
-						for (int32_t x = 0; x < request.width; x++)
-						{
-							const auto dst_x = request.dstX + x;
-							if (dst_x < 0 || dst_x >= out_w)
-								continue;
-							out_data_u32[(request.dstY + y) * out_w + (request.dstX + x)] = pixels_u32[y * request.width + x];
-						}
-					}
-					break;
-				}
 				default:
 					dwarnln("PutImage unsupported format {}, depth {}", request.format, request.depth);
 					break;
+			}
+
+			if (get_pixel != nullptr)
+			{
+				const auto* in_data_u32 = packet.as_span<const uint32_t>().data();
+				auto* out_data_u32 = out_data.as_span<uint32_t>().data();
+
+				const auto min_x = BAN::Math::max<int32_t>(0, -request.dstX);
+				const auto min_y = BAN::Math::max<int32_t>(0, -request.dstY);
+
+				const auto max_x = BAN::Math::min<int32_t>(request.width,  out_w - request.dstX);
+				const auto max_y = BAN::Math::min<int32_t>(request.height, out_h - request.dstY);
+
+				for (int32_t y = min_y; y < max_y; y++)
+				{
+					const auto row_off = (request.dstY + y) * out_w;
+					for (int32_t x = min_x; x < max_x; x++)
+						out_data_u32[row_off + (request.dstX + x)] = get_pixel(x, y, bpp, request.width, in_data_u32);
+				}
 			}
 
 			if (object.type == Object::Type::Window)
@@ -2802,8 +2779,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("GetImage");
 			dprintln("  drawable:  {}", request.drawable);
 			dprintln("  format:    {}", request.format);
-			dprintln("  depth:     {}", request.x);
-			dprintln("  dstX:      {}", request.y);
+			dprintln("  x:         {}", request.x);
+			dprintln("  y:         {}", request.y);
 			dprintln("  width:     {}", request.width);
 			dprintln("  height:    {}", request.height);
 			dprintln("  planeMask: {}", request.planeMask);
@@ -2811,30 +2788,60 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto& object = *g_objects[request.drawable];
 			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
 
-			// ZPixmap
-			if (request.format != 2)
-			{
-				dwarnln("GetImage unsupported format {}", request.format);
-				break;
-			}
+			uint8_t bpp = 0;
+			for (const auto& format : g_formats)
+				if (format.depth == out_depth)
+					bpp = format.bitsPerPixel;
+			ASSERT(bpp && 32 % bpp == 0);
 
 			ASSERT(request.x >= 0 && request.y >= 0);
 			ASSERT(request.x + request.width <= out_w);
 			ASSERT(request.y + request.height <= out_h);
 
+			const CARD32 length = (request.width * bpp + 31) / 32 * request.height;
 			xGetImageReply reply {
 				.type = X_Reply,
 				.depth = out_depth,
 				.sequenceNumber = client_info.sequence,
-				.length = static_cast<CARD32>(request.width * request.height),
+				.length = length,
 				.visual = g_visual.visualID,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-			for (int32_t y = 0; y < request.height; y++)
+
+			if (request.format != ZPixmap)
+				dwarnln("GetImage with format {}", request.format);
+
+			if (bpp == 32)
 			{
-				const size_t index = (request.y + y) * out_w + request.x;
-				const auto slice = out_data.slice(index * 4, request.width * 4);
-				TRY(encode(client_info.output_buffer, slice));
+				for (int32_t y = 0; y < request.height; y++)
+				{
+					const size_t index = (request.y + y) * out_w + request.x;
+					const auto slice = out_data.slice(index * 4, request.width * 4);
+					TRY(encode(client_info.output_buffer, slice));
+				}
+			}
+			else
+			{
+				BAN::Vector<uint32_t> scanline;
+				TRY(scanline.resize((request.width * bpp + 31) / 32));
+
+				for (int32_t y = 0; y < request.height; y++)
+				{
+					for (auto& dword : scanline)
+						dword = 0;
+
+					const auto row_off = (request.y + y) * out_w;
+					for (int32_t x = 0; x < request.width; x++)
+					{
+						const auto bit_offset = x * bpp;
+						const auto dword = bit_offset / 32;
+						const auto shift = bit_offset % 32;
+						const auto mask = (1u << bpp) - 1;
+						scanline[dword] |= (out_data[row_off + (request.x + x)] & mask) << shift;
+					}
+
+					TRY(encode(client_info.output_buffer, scanline));
+				}
 			}
 
 			break;
@@ -2927,6 +2934,108 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_LookupColor:
+		{
+			auto request = decode<xLookupColorReq>(packet).value();
+
+			auto name = BAN::StringView((char*)packet.data(), request.nbytes);
+			dprintln("LookupColor");
+			dprintln("  cmap:  {}", request.cmap);
+			dprintln("  color: {}", name);
+
+			// FIXME:
+			xLookupColorReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.exactRed = 0,
+				.exactGreen = 0,
+				.exactBlue = 0,
+				.screenRed = 0,
+				.screenGreen = 0,
+				.screenBlue = 0,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_CreateCursor:
+		{
+			auto request = decode<xCreateCursorReq>(packet).value();
+			
+			dprintln("CreateCursor");
+			dprintln("  cid:       {}", request.cid);
+			dprintln("  source:    {}", request.source);
+			dprintln("  mask:      {}", request.mask);
+			dprintln("  foreRed:   {}", request.foreRed);
+			dprintln("  foreGreen: {}", request.foreGreen);
+			dprintln("  foreBlue:  {}", request.foreBlue);
+			dprintln("  backRed:   {}", request.backRed);
+			dprintln("  backGreen: {}", request.backGreen);
+			dprintln("  backBlue:  {}", request.backBlue);
+			dprintln("  x:         {}", request.x);
+			dprintln("  y:         {}", request.y);
+
+			const auto& source = TRY_REF(get_pixmap(request.source));
+			ASSERT(source.depth == 1);
+
+			const uint32_t foreground =
+				static_cast<uint32_t>(request.foreRed   >> 8) << 16 |
+				static_cast<uint32_t>(request.foreBlue  >> 8) <<  8 |
+				static_cast<uint32_t>(request.foreGreen >> 8) <<  0;
+			const uint32_t background =
+				static_cast<uint32_t>(request.backRed   >> 8) << 16 |
+				static_cast<uint32_t>(request.backBlue  >> 8) <<  8 |
+				static_cast<uint32_t>(request.backGreen >> 8) <<  0;
+
+			Object::Cursor cursor {
+				.width = source.width,
+				.height = source.height,
+				.origin_x = request.x,
+				.origin_y = request.y,
+			};
+			TRY(cursor.pixels.resize(cursor.width * cursor.height));
+
+			auto* source_data_u32 = reinterpret_cast<const uint32_t*>(source.data.data());
+			for (size_t i = 0; i < cursor.width * cursor.height; i++)
+				cursor.pixels[i] = source_data_u32[i] ? foreground : background;
+
+			if (request.mask != None)
+			{
+				const auto& mask = TRY_REF(get_pixmap(request.mask));
+				ASSERT(mask.depth == 1);
+				ASSERT(mask.width == source.width);
+				ASSERT(mask.height == source.height);
+
+				auto* mask_data_u32 = reinterpret_cast<const uint32_t*>(mask.data.data());
+				for (size_t i = 0; i < cursor.width * cursor.height; i++)
+					if (mask_data_u32[i])
+						cursor.pixels[i] |= 0xFF000000;
+			}
+
+			TRY(client_info.objects.insert(request.cid));
+			TRY(g_objects.insert(
+				request.cid,
+				TRY(BAN::UniqPtr<Object>::create(Object {
+					.type = Object::Type::Cursor,
+					.object = BAN::move(cursor),
+				}))
+			));
+
+			break;
+		}
+		case X_FreeCursor:
+		{
+			const auto cid = packet.as_span<const uint32_t>()[1];
+			
+			dprintln("FreeCursor");
+			dprintln("  cid:       {}", cid);
+
+			client_info.objects.remove(cid);
+			g_objects.remove(cid);
+
+			break;
+		}
 		case X_QueryExtension:
 		{
 			auto request = decode<xQueryExtensionReq>(packet).value();
@@ -3000,18 +3109,20 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  firstKeyCode: {}", request.firstKeyCode);
 			dprintln("  count:        {}", request.count);
 
-			ASSERT(request.firstKeyCode + request.count - 1 <= g_keymap.size);
+			ASSERT(g_keymap_min_keycode <= request.firstKeyCode);
+			ASSERT(g_keymap_max_keycode >= request.firstKeyCode + request.count - 1);
 
 			xGetKeyboardMappingReply reply {
 				.type = X_Reply,
-				.keySymsPerKeyCode = 1,
+				.keySymsPerKeyCode = g_keymap_layers,
 				.sequenceNumber = client_info.sequence,
-				.length = request.count,
+				.length = static_cast<CARD32>(request.count * g_keymap_layers),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
 			for (size_t i = 0; i < request.count; i++)
-				TRY(encode<CARD32>(client_info.output_buffer, g_keymap.map[request.firstKeyCode + i]));
+				for (size_t j = 0; j < g_keymap_layers; j++)
+					TRY(encode<CARD32>(client_info.output_buffer, g_keymap[request.firstKeyCode + i][j]));
 
 			break;
 		}
@@ -3033,15 +3144,15 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			dprintln("GetPointerMapping");
 
-			// FIXME:
 			xGetPointerMappingReply reply {
 				.type = X_Reply,
+				.nElts = 8,
 				.sequenceNumber = client_info.sequence,
 				.length = 2,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
-			for (size_t i = 0; i < 8; i++)
+			for (size_t i = 1; i <= 8; i++)
 				TRY(encode<CARD8>(client_info.output_buffer, i));
 
 			break;
@@ -3058,20 +3169,26 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
+			using LibInput::keycode_normal;
+
 			// shift
-			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::LeftShift)));
-			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::RightShift)));
+			TRY(encode(client_info.output_buffer, keycode_normal(3, 0)));  // lshift
+			TRY(encode(client_info.output_buffer, keycode_normal(3, 12))); // rshift
 
 			// lock
-			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::CapsLock)));
+			TRY(encode(client_info.output_buffer, keycode_normal(2, 0))); // caps lock
 			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
 
 			// control
-			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::LeftCtrl)));
-			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(LibInput::Key::RightCtrl)));
+			TRY(encode(client_info.output_buffer, keycode_normal(4, 0))); // lcrtl
+			TRY(encode(client_info.output_buffer, keycode_normal(4, 6))); // rctrl
 
-			// Mod1 -> Mod5
-			for (size_t i = 1; i <= 5; i++)
+			// mod1
+			TRY(encode(client_info.output_buffer, keycode_normal(4, 2))); // lalt
+			TRY(encode(client_info.output_buffer, keycode_normal(4, 5))); // ralt
+
+			// mod2 -> mod5
+			for (size_t i = 2; i <= 5; i++)
 			{
 				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
 				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
@@ -3080,7 +3197,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			break;
 		}
 		default:
-			dwarnln("unsupported opcode {}", opcode_to_name[packet[0]]);
+			dwarnln("unsupported opcode {}", s_opcode_to_name[packet[0]]);
 			for (size_t i = 0; i < packet.size(); i++)
 				fprintf(stddbg, " %02x", packet[i]);
 			fprintf(stddbg, "\n");

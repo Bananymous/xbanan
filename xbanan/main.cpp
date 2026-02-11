@@ -438,6 +438,27 @@ int main()
 						continue;
 					}
 
+					const size_t auth_string_len = (client_prefix.nbytesAuthString + 3) / 4 * 4;
+					const size_t auth_proto_len = (client_prefix.nbytesAuthProto + 3) / 4 * 4;
+					const size_t auth_len = auth_string_len + auth_proto_len;
+
+					size_t auth_received = 0;
+					while (auth_received < auth_len)
+					{
+						char buffer[128];
+
+						const size_t to_recv = BAN::Math::min(sizeof(buffer), auth_len - auth_received);
+						const ssize_t nrecv = recv(client_info.fd, buffer, to_recv, 0);
+						if (nrecv < 0)
+							perror("xbanan: recv");
+						if (nrecv <= 0)
+						{
+							close_client(client_info.fd);
+							continue;
+						}
+						auth_received += nrecv;
+					}
+
 					ASSERT(nrecv == sizeof(client_prefix));
 
 					if (auto ret = setup_client_conneciton(client_info, client_prefix); ret.is_error())
@@ -491,8 +512,6 @@ int main()
 							auto* input_u32 = reinterpret_cast<uint32_t*>(client_info.input_buffer.data());
 							input_u32[1] = input_u32[0];
 							packet = packet.slice(4);
-
-							dprintln("handling big request");
 						}
 
 						if (auto ret = handle_packet(client_info, packet); ret.is_error() && ret.error().get_error_code() != ENOENT)

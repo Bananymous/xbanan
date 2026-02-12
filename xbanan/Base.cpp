@@ -1193,12 +1193,13 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			{
 				case Object::Type::Window:
 				{
-					auto& texture = object.object.get<Object::Window>().texture();
+					auto& window = object.object.get<Object::Window>();
+					auto& texture = window.texture();
 
 					info.data = { reinterpret_cast<uint8_t*>(texture.pixels().data()), texture.pixels().size() * 4 };
 					info.w = texture.width();
 					info.h = texture.height();
-					info.depth = 32;
+					info.depth = window.depth;
 
 					break;
 				}
@@ -1329,6 +1330,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				TRY(BAN::UniqPtr<Object>::create(Object {
 					.type = Object::Type::Window,
 					.object = Object::Window {
+						.depth = request.depth,
 						.x = request.x,
 						.y = request.y,
 						.event_mask = event_mask,

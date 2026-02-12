@@ -4,6 +4,8 @@ set(SOURCES
 	Extensions.cpp
 	ExtBigReg.cpp
 	ExtRANDR.cpp
+	ExtSHM.cpp
+	Image.cpp
 	Keymap.cpp
 )
 

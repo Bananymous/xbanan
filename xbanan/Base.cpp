@@ -1,5 +1,6 @@
 #include "Definitions.h"
 #include "Extensions.h"
+#include "Image.h"
 #include "Keymap.h"
 #include "Utils.h"
 
@@ -331,7 +332,7 @@ static void invalidate_window_recursive(WINDOW wid, int32_t x, int32_t y, int32_
 	);
 }
 
-static void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
+void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 {
 	ASSERT(wid != g_root.windowId);
 
@@ -2720,66 +2721,24 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				break;
 			}
 
-			uint8_t bpp = 0;
-			for (const auto& format : g_formats)
-				if (format.depth == request.depth)
-					bpp = format.bitsPerPixel;
-			ASSERT(bpp && 32 % bpp == 0);
-
-			uint32_t (*get_pixel)(int32_t x, int32_t y, uint8_t bpp, uint32_t width, const uint32_t* data) = nullptr;
-
-			switch (request.format)
-			{
-				case XYBitmap:
-					ASSERT(request.depth == 1);
-					[[fallthrough]];
-				case ZPixmap:
-					if (bpp == 32)
-					{
-						get_pixel =
-							[](int32_t x, int32_t y, uint8_t bpp, uint32_t width, const uint32_t* data) -> uint32_t
-							{
-								(void)bpp;
-								return data[y * width + x];
-							};
-					}
-					else
-					{
-						get_pixel =
-							[](int32_t x, int32_t y, uint8_t bpp, uint32_t width, const uint32_t* data) -> uint32_t
-							{
-								const auto bits_per_scanline = (bpp * width + 31) / 32 * 32;
-								const auto bit_offset = y * bits_per_scanline + x * bpp;
-								const auto dword = bit_offset / 32;
-								const auto shift = bit_offset % 32;
-								const auto mask = (1u << bpp) - 1;
-								return (data[dword] >> shift) & mask;
-							};
-					}
-					break;
-				default:
-					dwarnln("PutImage unsupported format {}, depth {}", request.format, request.depth);
-					break;
-			}
-
-			if (get_pixel != nullptr)
-			{
-				const auto* in_data_u32 = packet.as_span<const uint32_t>().data();
-				auto* out_data_u32 = out_data.as_span<uint32_t>().data();
-
-				const auto min_x = BAN::Math::max<int32_t>(0, -request.dstX);
-				const auto min_y = BAN::Math::max<int32_t>(0, -request.dstY);
-
-				const auto max_x = BAN::Math::min<int32_t>(request.width,  out_w - request.dstX);
-				const auto max_y = BAN::Math::min<int32_t>(request.height, out_h - request.dstY);
-
-				for (int32_t y = min_y; y < max_y; y++)
-				{
-					const auto row_off = (request.dstY + y) * out_w;
-					for (int32_t x = min_x; x < max_x; x++)
-						out_data_u32[row_off + (request.dstX + x)] = get_pixel(x, y, bpp, request.width, in_data_u32);
-				}
-			}
+			put_image({
+				.out_data = out_data.data(),
+				.out_x = request.dstX,
+				.out_y = request.dstY,
+				.out_w = out_w,
+				.out_h = out_h,
+				.out_depth = out_depth,
+				.in_data = packet.data(),
+				.in_x = 0,
+				.in_y = 0,
+				.in_w = request.width,
+				.in_h = request.height,
+				.in_depth = request.depth,
+				.w = request.width,
+				.h = request.height,
+				.left_pad = request.leftPad,
+				.format = request.format,
+			});
 
 			if (object.type == Object::Type::Window)
 				invalidate_window(request.drawable, request.dstX, request.dstY, request.width, request.height);

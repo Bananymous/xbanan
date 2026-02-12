@@ -21,6 +21,8 @@ static CARD16 s_butmask { 0 };
 
 static WINDOW s_focus_window { None };
 
+static BYTE s_pressed_keys[32] {};
+
 static const char* s_opcode_to_name[] {
 	[0] = "none",
 	[X_CreateWindow] = "X_CreateWindow",
@@ -1049,6 +1051,15 @@ static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::K
 	{
 		dwarnln("cannot send keycode {}", xkeycode);
 		return;
+	}
+
+	{
+		const uint8_t byte = xkeycode / 8;
+		const uint8_t bit = xkeycode % 8;
+		if (event.pressed())
+			s_pressed_keys[byte] |= 1 << bit;
+		else
+			s_pressed_keys[byte] &= ~(1 << bit);
 	}
 
 	s_keymask = 0;
@@ -2257,6 +2268,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 2,
 			};
+			memcpy(reply.map, s_pressed_keys, 32);
 			TRY(encode(client_info.output_buffer, reply));
 
 			break;

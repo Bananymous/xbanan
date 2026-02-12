@@ -2276,6 +2276,27 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_OpenFont:
+		{
+			auto request = decode<xOpenFontReq>(packet).value();
+
+			auto name = BAN::StringView((char*)packet.data(), request.nbytes);
+			dwarnln("OpenFont");
+			dwarnln("  fid:  {}", request.fid);
+			dwarnln("  name: {}", name);
+
+			xError error {
+				.type = X_Error,
+				.errorCode = BadName,
+				.sequenceNumber = client_info.sequence,
+				.resourceID = 0,
+				.minorCode = 0,
+				.majorCode = opcode,
+			};
+			TRY(encode(client_info.output_buffer, error));
+
+			break;
+		}
 		case X_GetInputFocus:
 		{
 			dprintln("GetInputFocus");

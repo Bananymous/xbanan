@@ -3,6 +3,16 @@
 
 #include <X11/X.h>
 
+uint32_t image_dwords(uint32_t width, uint32_t height, uint8_t depth)
+{
+	uint8_t bpp = 0;
+	for (const auto& format : g_formats)
+		if (format.depth == depth)
+			bpp = format.bitsPerPixel;
+	ASSERT(bpp && 32 % bpp == 0);
+	return (width * bpp + 31) / 32 * height;
+}
+
 void put_image(const PutImageInfo& info)
 {
 	uint8_t in_bpp = 0;
@@ -20,11 +30,7 @@ void put_image(const PutImageInfo& info)
 	auto* out_data_u32 = static_cast<uint32_t*>(info.out_data);
 	const auto* in_data_u32 = static_cast<const uint32_t*>(info.in_data);
 
-	if (!(info.format == XYBitmap || info.in_depth == info.out_depth))
-	{
-		dwarnln("format {}, in depth {}, out depth {}", info.format, info.in_depth, info.out_depth);
-		ASSERT_NOT_REACHED();
-	}
+	ASSERT(info.format == XYBitmap || info.in_depth == info.out_depth);
 
 	switch (info.format)
 	{
@@ -85,4 +91,53 @@ void put_image(const PutImageInfo& info)
 		default:
 			ASSERT_NOT_REACHED();
 	}
+}
+
+void get_image(const GetImageInfo& info)
+{
+	uint8_t out_bpp = 0;
+	for (const auto& format : g_formats)
+		if (format.depth == info.depth)
+			out_bpp = format.bitsPerPixel;
+	ASSERT(out_bpp && 32 % out_bpp == 0);
+
+	ASSERT(info.in_x >= 0 && info.in_y >= 0);
+	ASSERT(info.in_x + info.w <= info.in_w);
+	ASSERT(info.in_y + info.h <= info.in_h);
+
+	if (info.format != XYBitmap && info.format != ZPixmap)
+		dwarnln("GetImage with format {}", info.format);
+
+	auto* out_data_u32 = static_cast<uint32_t*>(info.out_data);
+	const auto* in_data_u32 = static_cast<const uint32_t*>(info.in_data);
+
+	if (out_bpp == 32)
+	{
+		for (int32_t y = 0; y < info.h; y++)
+		{
+			const size_t out_off = y * info.w;
+			const size_t in_off = (info.in_y + y) * info.in_w + info.in_x;
+			memcpy(&out_data_u32[out_off], &in_data_u32[in_off], info.w * 4);
+		}
+	}
+	else
+	{
+		const auto dwords_per_scanline = (info.w * out_bpp + 31) / 32;
+
+		memset(out_data_u32, 0, dwords_per_scanline * info.h * 4);
+
+		for (int32_t y = 0; y < info.h; y++)
+		{
+			const auto in_row_off = (info.in_y + y) * info.in_w + info.in_x;
+			for (int32_t x = 0; x < info.w; x++)
+			{
+				const auto bit_offset = x * out_bpp;
+				const auto dword = bit_offset / 32;
+				const auto shift = bit_offset % 32;
+				const auto mask = (1u << out_bpp) - 1;
+				out_data_u32[dword] |= (in_data_u32[in_row_off + x] & mask) << shift;
+			}
+		}
+	}
+
 }

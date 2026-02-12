@@ -4,10 +4,17 @@ set(SOURCES
 	Extensions.cpp
 	ExtBigReg.cpp
 	ExtRANDR.cpp
-	ExtSHM.cpp
 	Image.cpp
 	Keymap.cpp
 )
+
+include(CheckSymbolExists)
+
+check_symbol_exists(shmat "sys/shm.h" HAVE_SHMAT)
+check_symbol_exists(shmdt "sys/shm.h" HAVE_SHMDT)
+if(HAVE_SHMAT AND HAVE_SHMDT)
+	set(SOURCES ${SOURCES} ExtSHM.cpp)
+endif()
 
 add_executable(xbanan ${SOURCES})
 banan_link_library(xbanan ban)

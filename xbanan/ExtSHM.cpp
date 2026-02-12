@@ -258,6 +258,53 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 
 			break;
 		}
+		case X_ShmGetImage:
+		{
+			auto request = decode<xShmGetImageReq>(packet).value();
+
+			dprintln("ShmGetImage");
+			dprintln("  drawable:  {}", request.drawable);
+			dprintln("  x:         {}", request.x);
+			dprintln("  y:         {}", request.y);
+			dprintln("  wigth:     {}", request.width);
+			dprintln("  height:    {}", request.height);
+			dprintln("  planeMask: {}", request.planeMask);
+			dprintln("  format:    {}", request.format);
+			dprintln("  shmseg:    {}", request.shmseg);
+			dprintln("  offset:    {}", request.offset);
+
+			auto& shm_segment = s_shm_segments[request.shmseg];
+
+			auto& object = TRY_REF(get_drawable(request.drawable));
+			auto [in_data, in_w, in_h, in_depth] = get_drawable_info(object);
+
+			const auto dwords = image_dwords(request.width, request.height, in_depth);
+
+			get_image({
+				.out_data = (uint8_t*)shm_segment.addr + request.offset,
+				.in_data = in_data.data(),
+				.in_x = request.x,
+				.in_y = request.y,
+				.in_w = in_w,
+				.in_h = in_h,
+				.w = request.width,
+				.h = request.height,
+				.depth = in_depth,
+				.format = request.format,
+			});
+
+			xShmGetImageReply reply {
+				.type = X_Reply,
+				.depth = in_depth,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.visual = g_visual.visualID,
+				.size = dwords * 4,
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
 		default:
 			dwarnln("unsupported shm minor opcode {}", packet[1]);
 			break;

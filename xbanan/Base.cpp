@@ -2780,63 +2780,36 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  planeMask: {}", request.planeMask);
 
 			auto& object = *g_objects[request.drawable];
-			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
+			auto [in_data, in_w, in_h, in_depth] = get_drawable_info(object);
 
-			uint8_t bpp = 0;
-			for (const auto& format : g_formats)
-				if (format.depth == out_depth)
-					bpp = format.bitsPerPixel;
-			ASSERT(bpp && 32 % bpp == 0);
+			const auto dwords = image_dwords(request.width, request.height, in_depth);
 
-			ASSERT(request.x >= 0 && request.y >= 0);
-			ASSERT(request.x + request.width <= out_w);
-			ASSERT(request.y + request.height <= out_h);
-
-			const CARD32 length = (request.width * bpp + 31) / 32 * request.height;
 			xGetImageReply reply {
 				.type = X_Reply,
-				.depth = out_depth,
+				.depth = in_depth,
 				.sequenceNumber = client_info.sequence,
-				.length = length,
+				.length = dwords,
 				.visual = g_visual.visualID,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
-			if (request.format != ZPixmap)
-				dwarnln("GetImage with format {}", request.format);
+			const auto old_size = client_info.output_buffer.size();
+			TRY(client_info.output_buffer.resize(old_size + dwords * 4));
 
-			if (bpp == 32)
-			{
-				for (int32_t y = 0; y < request.height; y++)
-				{
-					const size_t index = (request.y + y) * out_w + request.x;
-					const auto slice = out_data.slice(index * 4, request.width * 4);
-					TRY(encode(client_info.output_buffer, slice));
-				}
-			}
-			else
-			{
-				BAN::Vector<uint32_t> scanline;
-				TRY(scanline.resize((request.width * bpp + 31) / 32));
+			auto* out_data = client_info.output_buffer.data() + old_size;
 
-				for (int32_t y = 0; y < request.height; y++)
-				{
-					for (auto& dword : scanline)
-						dword = 0;
-
-					const auto row_off = (request.y + y) * out_w;
-					for (int32_t x = 0; x < request.width; x++)
-					{
-						const auto bit_offset = x * bpp;
-						const auto dword = bit_offset / 32;
-						const auto shift = bit_offset % 32;
-						const auto mask = (1u << bpp) - 1;
-						scanline[dword] |= (out_data[row_off + (request.x + x)] & mask) << shift;
-					}
-
-					TRY(encode(client_info.output_buffer, scanline));
-				}
-			}
+			get_image({
+				.out_data = out_data,
+				.in_data = in_data.data(),
+				.in_x = request.x,
+				.in_y = request.y,
+				.in_w = in_w,
+				.in_h = in_h,
+				.w = request.width,
+				.h = request.height,
+				.depth = in_depth,
+				.format = request.format,
+			});
 
 			break;
 		}

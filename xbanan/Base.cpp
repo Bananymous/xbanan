@@ -3108,8 +3108,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			{
 				if (extension.handler == nullptr)
 					continue;
+				TRY(encode<BYTE>(client_info.output_buffer, extension.name.size()));
 				TRY(encode(client_info.output_buffer, extension.name));
-				TRY(encode(client_info.output_buffer, '\0'));
 			}
 
 			for (size_t i = 0; (extension_length + i) % 4; i++)

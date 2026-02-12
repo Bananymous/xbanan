@@ -3073,6 +3073,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					continue;
 				reply.present = xTrue;
 				reply.major_opcode = extension.major_opcode;
+				reply.first_event = extension.event_base;
+				reply.first_error = extension.error_base;
 				break;
 			}
 

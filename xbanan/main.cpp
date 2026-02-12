@@ -1,6 +1,5 @@
 #include "Base.h"
 #include "Definitions.h"
-#include "Extensions.h"
 #include "Keymap.h"
 #include "Utils.h"
 
@@ -94,34 +93,6 @@ ATOM g_atom_value = XA_LAST_PREDEFINED + 1;
 
 int g_epoll_fd;
 BAN::HashMap<int, EpollThingy> g_epoll_thingies;
-
-BAN::ErrorOr<void> extension_bigrequests(Client& client_info, BAN::ConstByteSpan packet)
-{
-	switch (packet[1])
-	{
-		case 0:
-		{
-			xGenericReply reply {
-				.type = X_Reply,
-				.sequenceNumber = client_info.sequence,
-				.length = 0,
-				.data00 = (16 << 20) / 4, // 16 MiB
-			};
-			TRY(encode(client_info.output_buffer, reply));
-
-			client_info.has_bigrequests = true;
-
-			dprintln("client enabled big requests");
-
-			break;
-		}
-		default:
-			dwarnln("invalid BIG-REQUESTS minor opcode {}", packet[1]);
-			return BAN::Error::from_errno(EINVAL);
-	}
-
-	return {};
-}
 
 int main()
 {
@@ -268,8 +239,6 @@ int main()
 #undef APPEND_ATOM
 
 	MUST(initialize_keymap());
-
-	install_extension("BIG-REQUESTS"_sv, extension_bigrequests);
 
 	printf("xbanan started\n");
 

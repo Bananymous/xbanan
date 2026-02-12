@@ -1,5 +1,4 @@
 #include "Extensions.h"
-#include "ExtRANDR.h"
 #include "Utils.h"
 
 #include <X11/X.h>
@@ -7,15 +6,7 @@
 
 #include <time.h>
 
-static struct RANDRInstaller
-{
-	RANDRInstaller()
-	{
-		install_extension(RANDR_NAME, extension_randr);
-	}
-} installer;
-
-BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpan packet)
+static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpan packet)
 {
 	static CARD32 crtc_id   = 5;
 	static CARD32 output_id = 6;
@@ -479,3 +470,11 @@ BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpan packe
 
 	return {};
 }
+
+static struct RANDRInstaller
+{
+	RANDRInstaller()
+	{
+		install_extension(RANDR_NAME, RRNumberEvents, RRNumberErrors, extension_randr);
+	}
+} installer;

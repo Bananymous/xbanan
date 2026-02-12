@@ -2,6 +2,7 @@ set(SOURCES
 	main.cpp
 	Base.cpp
 	Extensions.cpp
+	ExtBigReg.cpp
 	ExtRANDR.cpp
 	Keymap.cpp
 )

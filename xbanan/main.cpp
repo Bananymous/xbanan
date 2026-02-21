@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define USE_UNIX_SOCKET 0
 

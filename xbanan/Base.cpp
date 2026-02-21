@@ -3140,7 +3140,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto* source_data_u32 = reinterpret_cast<const uint32_t*>(source.data.data());
 			for (size_t i = 0; i < cursor.width * cursor.height; i++)
-				cursor.pixels[i] = source_data_u32[i] ? foreground : background;
+				cursor.pixels[i] = 0xFF000000 | (source_data_u32[i] ? foreground : background);
 
 			if (request.mask != None)
 			{
@@ -3151,8 +3151,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 				auto* mask_data_u32 = reinterpret_cast<const uint32_t*>(mask.data.data());
 				for (size_t i = 0; i < cursor.width * cursor.height; i++)
-					if (mask_data_u32[i])
-						cursor.pixels[i] |= 0xFF000000;
+					if (!mask_data_u32[i])
+						cursor.pixels[i] = 0;
 			}
 
 			TRY(client_info.objects.insert(request.cid));

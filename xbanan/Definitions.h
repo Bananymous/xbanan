@@ -41,6 +41,7 @@ struct Object
 		Window,
 		Pixmap,
 		GraphicsContext,
+		Extension,
 	};
 
 	Type type;
@@ -133,7 +134,15 @@ struct Object
 		}
 	};
 
-	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext> object;
+	struct Extension
+	{
+		uint8_t type_major;
+		uint8_t type_minor;
+		void* c_private;
+		void (*destructor)(Extension&);
+	};
+
+	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext, Extension> object;
 };
 
 struct Client

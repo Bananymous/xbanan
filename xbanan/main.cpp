@@ -1,7 +1,6 @@
 #include "Base.h"
 #include "Definitions.h"
 #include "Keymap.h"
-#include "Utils.h"
 
 #include <X11/X.h>
 #include <X11/Xatom.h>
@@ -267,6 +266,11 @@ int main()
 						epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, gui_window->server_fd(), nullptr);
 						g_epoll_thingies.remove(gui_window->server_fd());
 					}
+				}
+				if (object.type == Object::Type::Extension)
+				{
+					auto& extension = object.object.get<Object::Extension>();
+					extension.destructor(extension);
 				}
 
 				g_objects.remove(it);

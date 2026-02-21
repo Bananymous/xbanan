@@ -1,4 +1,5 @@
 #include "Definitions.h"
+#include "Drawing.h"
 #include "Extensions.h"
 #include "Font.h"
 #include "Image.h"
@@ -2410,6 +2411,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			uint32_t foreground = 0x000000;
 			uint32_t background = 0x000000;
+			uint16_t line_width = 0;
 			uint32_t font = None;
 			bool graphics_exposures = true;
 			uint32_t clip_mask = 0;
@@ -2430,6 +2432,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 3:
 						dprintln("    background: {8h}", value);
 						background = value;
+						break;
+					case 4:
+						dprintln("    line-width: {}", value);
+						line_width = value;
 						break;
 					case 14:
 						dprintln("    font: {}", value);
@@ -2463,6 +2469,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.object = Object::GraphicsContext { 
 					.foreground = foreground,
 					.background = background,
+					.line_width = line_width,
 					.font = font,
 					.graphics_exposures = graphics_exposures,
 					.clip_mask = clip_mask,
@@ -2503,6 +2510,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 3:
 						dprintln("    background: {8h}", value);
 						gc.background = value;
+						break;
+					case 4:
+						dprintln("    line-width: {}", value);
+						gc.line_width = value;
 						break;
 					case 14:
 						dprintln("    font: {}", value);
@@ -2679,132 +2690,18 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_PolyLine:
+			TRY(poly_line(client_info, packet));
+			break;
+		case X_PolySegment:
+			TRY(poly_segment(client_info, packet));
+			break;
 		case X_PolyFillRectangle:
-		{
-			auto request = decode<xPolyFillRectangleReq>(packet).value();
-
-			dprintln("PolyFillRectangle");
-			dprintln("  drawable: {}", request.drawable);
-			dprintln("  gc:       {}", request.gc);
-
-			auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, opcode));
-
-			const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
-			const auto foreground = gc.foreground;
-
-			dprintln("  rects:");
-			while (!packet.empty())
-			{
-				const auto rect = decode<xRectangle>(packet).value();
-
-				dprintln("    rect");
-				dprintln("      x, y: {},{}", rect.x, rect.y);
-				dprintln("      w, h: {},{}", rect.width, rect.height);
-
-				const int32_t min_x = BAN::Math::max<int32_t>(rect.x, 0);
-				const int32_t min_y = BAN::Math::max<int32_t>(rect.y, 0);
-				const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width, out_w);
-				const int32_t max_y = BAN::Math::min<int32_t>(rect.y + rect.height, out_h);
-
-				for (int32_t y = min_y; y < max_y; y++)
-					for (int32_t x = min_x; x < max_x; x++)
-						if (!gc.is_clipped(x, y))
-							out_data_u32[y * out_w + x] = foreground;
-
-				if (g_objects[request.drawable]->type == Object::Type::Window)
-					invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
-			}
-
+			TRY(poly_fill_rectangle(client_info, packet));
 			break;
-		}
 		case X_PolyFillArc:
-		{
-			auto request = decode<xPolyFillArcReq>(packet).value();
-
-			dprintln("PolyFillArc");
-			dprintln("  drawable: {}", request.drawable);
-			dprintln("  gc:       {}", request.gc);
-
-			auto [out_data_32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, opcode));
-
-			auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyFillArc));
-			const auto foreground = gc.foreground;
-
-			const auto normalize_angle =
-				[](float f) -> float
-				{
-					const float radians = f * (2.0f * BAN::numbers::pi_v<float> / 64.0f / 360.0f);
-					const float mod = BAN::Math::fmod(radians, 2.0f * BAN::numbers::pi_v<float>);
-					if (mod < 0.0f)
-						return mod + 2.0f * BAN::numbers::pi_v<float>;
-					return mod;
-				};
-
-			dprintln("  arcs:");
-			while (!packet.empty())
-			{
-				const auto arc = decode<xArc>(packet).value();
-
-				dprintln("    arc");
-				dprintln("      x,  y:  {},{}", arc.x, arc.y);
-				dprintln("      w,  h:  {},{}", arc.width, arc.height);
-				dprintln("      a1, a2: {},{}", arc.angle1, arc.angle2);
-
-				const int32_t min_x = BAN::Math::max<int32_t>(0, arc.x);
-				const int32_t min_y = BAN::Math::max<int32_t>(0, arc.y);
-				
-				const int32_t max_x = BAN::Math::min<int32_t>(out_w, arc.x + arc.width);
-				const int32_t max_y = BAN::Math::min<int32_t>(out_h, arc.y + arc.height);
-
-				const auto rx = arc.width / 2;
-				const auto ry = arc.height / 2;
-
-				const auto cx = arc.x + rx;
-				const auto cy = arc.y + ry;
-
-				auto angle1 = normalize_angle(arc.angle1);
-				auto angle2 = normalize_angle(arc.angle1 + arc.angle2);
-				if (arc.angle2 < 0)
-					BAN::swap(angle1, angle2);
-
-				const bool full_circle = BAN::Math::abs(arc.angle2) >= 360 * 64;
-
-				for (int32_t y = min_y; y < max_y; y++)
-				{
-					for (int32_t x = min_x; x < max_x; x++)
-					{
-						const int32_t dx = x - cx;
-						const int32_t dy = cy - y;
-
-						if ((float)(dx*dx) / (rx*rx) + (float)(dy*dy) / (ry*ry) > 1.0f)
-							continue;
-
-						if (!full_circle)
-						{
-							const auto theta = BAN::Math::atan2<float>(dy, dx);
-							if (angle1 <= angle2)
-							{
-								if (!(theta >= angle1 && theta <= angle2))
-									continue;
-							}
-							else
-							{
-								if (!(theta >= angle1 || theta <= angle2))
-									continue;
-							}
-						}
-
-						if (!gc.is_clipped(x, y))
-							out_data_32[y * out_w + x] = foreground;
-					}
-				}
-
-				if (g_objects[request.drawable]->type == Object::Type::Window)
-					invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
-			}
-
+			TRY(poly_fill_arc(client_info, packet));
 			break;
-		}
 		case X_PutImage:
 		{
 			auto request = decode<xPutImageReq>(packet).value();

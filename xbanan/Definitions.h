@@ -112,6 +112,8 @@ struct Object
 		uint32_t foreground;
 		uint32_t background;
 
+		uint16_t line_width;
+
 		uint32_t font;
 
 		bool graphics_exposures;

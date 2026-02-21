@@ -1,6 +1,7 @@
 set(SOURCES
 	main.cpp
 	Base.cpp
+	Drawing.cpp
 	Extensions.cpp
 	ExtBigReg.cpp
 	ExtGLX.cpp

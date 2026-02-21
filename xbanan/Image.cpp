@@ -52,7 +52,8 @@ void put_image(const PutImageInfo& info)
 					for (size_t i = 0; i < info.in_depth; i++)
 						if (in_data_u32[dword + i * dwords_per_plane]  & bit_mask)
 							pixel |= 1u << i;
-					out_data_u32[dst_off + x] = pixel;
+					if (!info.gc.is_clipped(x, y))
+						out_data_u32[dst_off + x] = pixel;
 				}
 			}
 			break;
@@ -60,7 +61,7 @@ void put_image(const PutImageInfo& info)
 		case ZPixmap:
 		{
 			ASSERT(info.left_pad == 0);
-			if (in_bpp == 32)
+			if (in_bpp == 32 && info.gc.clip_mask == None)
 			{
 				const auto bytes_per_row = (max_x - min_x) * 4;
 				for (int32_t y = min_y; y < max_y; y++)
@@ -82,7 +83,8 @@ void put_image(const PutImageInfo& info)
 						const auto bit_offset = (info.in_y + y) * bits_per_scanline + (info.in_x + x) * in_bpp;
 						const auto dword = bit_offset / 32;
 						const auto shift = bit_offset % 32;
-						out_data_u32[dst_off + x] = (in_data_u32[dword] >> shift) & pixel_mask;
+						if (!info.gc.is_clipped(x, y))
+							out_data_u32[dst_off + x] = (in_data_u32[dword] >> shift) & pixel_mask;
 					}
 				}
 			}

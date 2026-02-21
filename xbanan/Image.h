@@ -1,7 +1,6 @@
 #pragma once
 
-#include <stdint.h>
-#include <stddef.h>
+#include "Definitions.h"
 
 struct PutImageInfo
 {
@@ -24,6 +23,8 @@ struct PutImageInfo
 
 	uint32_t left_pad;
 	uint8_t format;
+
+	const Object::GraphicsContext& gc;
 };
 
 struct GetImageInfo

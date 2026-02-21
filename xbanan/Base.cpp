@@ -2469,8 +2469,13 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  gc       {}", request.gc);
 			dprintln("  mask     {8h}", request.mask);
 
+			// TODO: support invisible background
+
 			uint32_t foreground = 0x000000;
 			uint32_t background = 0x000000;
+			uint32_t clip_mask = 0;
+			int32_t clip_origin_x = 0;
+			int32_t clip_origin_y = 0;
 			for (size_t i = 0; i < 32; i++)
 			{
 				if (!((request.mask >> i) & 1))
@@ -2487,6 +2492,18 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						dprintln("    background: {8h}", value);
 						background = value;
 						break;
+					case 17:
+						dprintln("    clip-origin-x: {}", value);
+						clip_origin_x = value;
+						break;
+					case 18:
+						dprintln("    clip-origin-y: {}", value);
+						clip_origin_y = value;
+						break;
+					case 19:
+						dprintln("    clip-mask: {}", value);
+						clip_mask = value;
+						break;
 					default:
 						dprintln("    {8h}: {8h}", 1 << i, value);
 						break;
@@ -2499,6 +2516,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.object = Object::GraphicsContext { 
 					.foreground = foreground,
 					.background = background,
+					.clip_mask = clip_mask,
+					.clip_origin_x = clip_origin_x,
+					.clip_origin_y = clip_origin_y,
 				}
 			}))));
 
@@ -2509,13 +2529,15 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xChangeGCReq>(packet).value();
 
 			dprintln("ChangeGC");
-			dprintln("  gc       {}", request.gc);
-			dprintln("  mask     {8h}", request.mask);
+			dprintln("  gc:   {}", request.gc);
+			dprintln("  mask: {8h}", request.mask);
 
 			auto& object = *g_objects[request.gc];
 			ASSERT(object.type == Object::Type::GraphicsContext);
 
 			auto& gc = object.object.get<Object::GraphicsContext>();
+
+			// TODO: support invisible background
 
 			for (size_t i = 0; i < 32; i++)
 			{
@@ -2533,11 +2555,52 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						dprintln("    background: {8h}", value);
 						gc.background = value;
 						break;
+					case 17:
+						dprintln("    clip-origin-x: {}", value);
+						gc.clip_origin_x = value;
+						break;
+					case 18:
+						dprintln("    clip-origin-y: {}", value);
+						gc.clip_origin_y = value;
+						break;
+					case 19:
+						dprintln("    clip-mask: {}", value);
+						gc.clip_mask = value;
+						gc.clip_rects.clear();
+						break;
 					default:
 						dprintln("    {8h}: {8h}", 1 << i, value);
 						break;
 				}
 			}
+
+			break;
+		}
+		case X_SetClipRectangles:
+		{
+			auto request = decode<xSetClipRectanglesReq>(packet).value();
+
+			dprintln("SetClipRectangles");
+			dprintln("  gc:       {}", request.gc);
+			dprintln("  ordering: {}", request.ordering);
+			dprintln("  xOrigin:  {}", request.xOrigin);
+			dprintln("  yOrigin:  {}", request.yOrigin);
+
+			auto& object = *g_objects[request.gc];
+			ASSERT(object.type == Object::Type::GraphicsContext);
+			auto& gc = object.object.get<Object::GraphicsContext>();
+
+			auto rects = packet.as_span<const xRectangle>();
+
+			TRY(gc.clip_rects.resize(rects.size()));
+			gc.clip_mask = UINT32_MAX;
+			gc.clip_origin_x = request.xOrigin;
+			gc.clip_origin_y = request.yOrigin;
+			memcpy(gc.clip_rects.data(), rects.data(), rects.size() * sizeof(xRectangle));
+
+			dprintln("  rects:");
+			for (auto rect : rects)
+				dprintln("  {},{}  {},{}", rect.x, rect.y, rect.width, rect.height);
 
 			break;
 		}
@@ -2587,6 +2650,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("CopyArea");
 			dprintln("  srcDrawable: {}", request.srcDrawable);
 			dprintln("  dstDrawable: {}", request.dstDrawable);
+			dprintln("  gc:          {}", request.gc);
 			dprintln("  srcX:        {}", request.srcX);
 			dprintln("  srcY:        {}", request.srcY);
 			dprintln("  dstX:        {}", request.dstX);
@@ -2599,6 +2663,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto& dst_drawable = TRY_REF(get_drawable(request.dstDrawable));
 			auto [dst_data, dst_w, dst_h, dst_depth] = get_drawable_info(dst_drawable);
+
+			auto& gc_object = *g_objects[request.gc];
+			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+			auto& gc = gc_object.object.get<Object::GraphicsContext>();
 
 			const auto get_pixel =
 				[&](int32_t x, int32_t y) -> uint32_t
@@ -2673,7 +2741,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						continue;
 					if (dst_x < 0 || dst_x >= dst_w)
 						continue;
-					set_pixel(dst_x, dst_y, get_pixel(src_x, src_y));
+					if (!gc.is_clipped(dst_x, dst_y))
+						set_pixel(dst_x, dst_y, get_pixel(src_x, src_y));
 				}
 			}
 
@@ -2692,6 +2761,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto& gc_object = *g_objects[request.gc];
 			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+			auto& gc = gc_object.object.get<Object::GraphicsContext>();
 
 			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
 
@@ -2715,7 +2785,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				auto* data_u32 = data.as_span<uint32_t>().data();
 				for (int32_t y = min_y; y < max_y; y++)
 					for (int32_t x = min_x; x < max_x; x++)
-						data_u32[y * w + x] = foreground;
+						if (!gc.is_clipped(x, y))
+							data_u32[y * w + x] = foreground;
 
 				if (drawable.type == Object::Type::Window)
 					invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
@@ -2733,6 +2804,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto& gc_object = *g_objects[request.gc];
 			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+			auto& gc = gc_object.object.get<Object::GraphicsContext>();
 
 			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
 
@@ -2805,7 +2877,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 							}
 						}
 
-						texture.set_pixel(x, y, foreground);
+						if (gc.is_clipped(x, y))
+							texture.set_pixel(x, y, foreground);
 					}
 				}
 
@@ -2821,6 +2894,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 #if 0
 			dprintln("PutImage");
 			dprintln("  drawable: {}", request.drawable);
+			dprintln("  gc:       {}", request.gc);
 			dprintln("  format:   {}", request.format);
 			dprintln("  depth:    {}", request.depth);
 			dprintln("  dstX:     {}", request.dstX);
@@ -2831,6 +2905,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto& object = TRY_REF(get_drawable(request.drawable));
 			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
+
+			auto& gc_object = *g_objects[request.gc];
+			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+			auto& gc = gc_object.object.get<Object::GraphicsContext>();
 
 			if (packet.empty())
 			{
@@ -2855,6 +2933,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.h = request.height,
 				.left_pad = request.leftPad,
 				.format = request.format,
+				.gc = gc,
 			});
 
 			if (object.type == Object::Type::Window)

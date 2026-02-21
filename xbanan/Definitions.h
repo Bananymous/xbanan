@@ -107,6 +107,30 @@ struct Object
 	{
 		uint32_t foreground;
 		uint32_t background;
+
+		uint32_t clip_mask;
+		int32_t clip_origin_x;
+		int32_t clip_origin_y;
+		BAN::Vector<xRectangle> clip_rects;
+
+		inline bool is_clipped(int32_t x, int32_t y) const
+		{
+			if (clip_mask == 0)
+				return false;
+
+			if (clip_mask == UINT32_MAX)
+			{
+				x -= clip_origin_x;
+				y -= clip_origin_y;
+				for (const auto& rect : clip_rects)
+					if (x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height)
+						return false;
+				return true;
+			}
+
+			// TODO pixmap clipping
+			return false;
+		}
 	};
 
 	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext> object;

@@ -222,6 +222,10 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 			auto& object = TRY_REF(get_drawable(request.drawable));
 			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
 
+			auto& gc_object = *g_objects[request.gc];
+			ASSERT(gc_object.type == Object::Type::GraphicsContext);
+			auto& gc = gc_object.object.get<Object::GraphicsContext>();
+
 			put_image({
 				.out_data = out_data.data(),
 				.out_x = request.dstX,
@@ -239,6 +243,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.h = request.srcHeight,
 				.left_pad = 0,
 				.format = request.format,
+				.gc = gc,
 			});
 
 			if (object.type == Object::Type::Window)

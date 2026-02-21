@@ -1505,6 +1505,81 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_ReparentWindow:
+		{
+			auto request = decode<xReparentWindowReq>(packet).value();
+
+			dprintln("ReparentWinow");
+			dprintln("  window: {}", request.window);
+			dprintln("  parent: {}", request.parent);
+			dprintln("  x:      {}", request.x);
+			dprintln("  y:      {}", request.y);
+
+			auto& window = TRY_REF(get_window(request.window));
+			auto& new_parent = TRY_REF(get_window(request.parent));
+			auto& old_parent = TRY_REF(get_window(window.parent));
+
+			const auto wid = request.window;
+			const auto oldpwid = window.parent;
+			const auto newpwid = request.parent;
+
+			const bool was_mapped = window.mapped;
+
+			if (was_mapped)
+				TRY(unmap_window(client_info, wid));
+
+			TRY(new_parent.children.push_back(wid));
+			window.x = request.x;
+			window.y = request.y;
+			window.parent = request.parent;
+
+			for (size_t i = 0; i < old_parent.children.size(); i++)
+			{
+				if (old_parent.children[i] != wid)
+					continue;
+				old_parent.children.remove(i);
+				break;
+			}
+
+			if (was_mapped)
+				TRY(map_window(client_info, wid));
+
+			if (old_parent.event_mask & SubstructureNotifyMask)
+			{
+				xEvent event = { .u = {
+					.reparent = {
+						.event = oldpwid,
+						.window = wid,
+						.parent = newpwid,
+						.x = request.x,
+						.y = request.y,
+						.override = xFalse,
+					}
+				}};
+				event.u.u.type = ReparentNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			if (new_parent.event_mask & SubstructureNotifyMask)
+			{
+				xEvent event = { .u = {
+					.reparent = {
+						.event = newpwid,
+						.window = wid,
+						.parent = newpwid,
+						.x = request.x,
+						.y = request.y,
+						.override = xFalse,
+					}
+				}};
+				event.u.u.type = ReparentNotify;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
+			}
+
+			break;
+		}
 		case X_MapWindow:
 		{
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
@@ -2011,6 +2086,28 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					}
 				}
 			}
+
+			break;
+		}
+		case X_ListProperties:
+		{
+			const CARD32 wid = packet.as_span<const uint32_t>()[1];
+
+			dprintln("ListProperties");
+			dprintln("  window:    {}", wid);
+
+			const auto& window = TRY_REF(get_window(wid));
+
+			xListPropertiesReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = static_cast<CARD32>(window.properties.size()),
+				.nProperties = static_cast<CARD16>(window.properties.size()),
+			};
+			TRY(encode(client_info.output_buffer, reply));
+
+			for (const auto& [atom, _] : window.properties)
+				TRY(encode(client_info.output_buffer, atom));
 
 			break;
 		}
@@ -3000,6 +3097,28 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			client_info.objects.remove(cid);
 			g_objects.remove(cid);
+
+			break;
+		}
+		case X_QueryBestSize:
+		{
+			auto request = decode<xQueryBestSizeReq>(packet).value();
+
+			dprintln("FreeCursor");
+			dprintln("  class:    {}", request.c_class);
+			dprintln("  drawable: {}", request.drawable);
+			dprintln("  width:    {}", request.width);
+			dprintln("  height:   {}", request.height);
+
+			// FIXME
+			xQueryBestSizeReply reply {
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.width = request.width,
+				.height = request.height,
+			};
+			TRY(encode(client_info.output_buffer, reply));
 
 			break;
 		}

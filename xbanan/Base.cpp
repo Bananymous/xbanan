@@ -1501,6 +1501,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("DestroyWinow");
 			dprintln("  window: {}", wid);
 
+			(void)TRY_REF(get_window(wid));
 			TRY(destroy_window(client_info, wid));
 
 			break;
@@ -2452,12 +2453,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("FreePixmap");
 			dprintln("  pixmap: {}", pid);
 
-			auto it = g_objects.find(pid);
-			ASSERT(it != g_objects.end());
-			ASSERT(it->value->type == Object::Type::Pixmap);
-
+			(void)TRY_REF(get_pixmap(pid));
 			client_info.objects.remove(pid);
-			g_objects.remove(it);
+			g_objects.remove(pid);
 
 			break;
 		}

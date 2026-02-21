@@ -17,6 +17,19 @@
 #include <netinet/in.h>
 #endif
 
+static const xRectangle s_screen_bounds =
+	[]() {
+		auto attributes = LibGUI::Window::default_attributes;
+		attributes.shown = false;
+		auto window = MUST(LibGUI::Window::create(0, 0, ""_sv, attributes));
+		return xRectangle {
+			.x = 0,
+			.y = 0,
+			.width = static_cast<CARD16>(window->width()),
+			.height = static_cast<CARD16>(window->height()),
+		};
+	}();
+
 const xPixmapFormat g_formats[6] {
 	{
 		.depth = 1,
@@ -71,10 +84,10 @@ const xWindowRoot g_root {
 	.whitePixel = 0xFFFFFF,
 	.blackPixel = 0x000000,
 	.currentInputMask = 0,
-	.pixWidth = 1280,
-	.pixHeight = 800,
-	.mmWidth = 1280,
-	.mmHeight = 800,
+	.pixWidth = s_screen_bounds.width,
+	.pixHeight = s_screen_bounds.height,
+	.mmWidth  = static_cast<CARD16>(s_screen_bounds.width  * 254 / 960), // 96 DPI
+	.mmHeight = static_cast<CARD16>(s_screen_bounds.height * 254 / 960), // 96 DPI
 	.minInstalledMaps = 1,
 	.maxInstalledMaps = 1,
 	.rootVisualID = g_visual.visualID,

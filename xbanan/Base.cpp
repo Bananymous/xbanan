@@ -2466,6 +2466,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			uint32_t foreground = 0x000000;
 			uint32_t background = 0x000000;
 			uint32_t font = None;
+			bool graphics_exposures = true;
 			uint32_t clip_mask = 0;
 			int32_t clip_origin_x = 0;
 			int32_t clip_origin_y = 0;
@@ -2488,6 +2489,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 14:
 						dprintln("    font: {}", value);
 						font = value;
+						break;
+					case 16:
+						dprintln("    graphics-exposures: {}", value);
+						graphics_exposures = value;
 						break;
 					case 17:
 						dprintln("    clip-origin-x: {}", value);
@@ -2514,6 +2519,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.foreground = foreground,
 					.background = background,
 					.font = font,
+					.graphics_exposures = graphics_exposures,
 					.clip_mask = clip_mask,
 					.clip_origin_x = clip_origin_x,
 					.clip_origin_y = clip_origin_y,
@@ -2556,6 +2562,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 14:
 						dprintln("    font: {}", value);
 						gc.font = value;
+						break;
+					case 16:
+						dprintln("    graphics-exposures: {}", value);
+						gc.graphics_exposures = value;
 						break;
 					case 17:
 						dprintln("    clip-origin-x: {}", value);
@@ -2727,7 +2737,15 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					}	
 				};
 
-			for (int32_t yoff = 0; yoff < request.height; yoff++)
+			const int32_t start_x = request.srcX < request.dstX ? request.width - 1 : 0;
+			const int32_t stop_x  = request.srcX < request.dstX ? -1 : request.width;
+			const int32_t step_x  = request.srcX < request.dstX ? -1 : 1;
+
+			const int32_t start_y = request.srcY < request.dstY ? request.height - 1 : 0;
+			const int32_t stop_y  = request.srcY < request.dstY ? -1 : request.height;
+			const int32_t step_y  = request.srcY < request.dstY ? -1 : 1;
+
+			for (int32_t yoff = start_y; yoff != stop_y; yoff += step_y)
 			{
 				const int32_t src_y = request.srcY + yoff;
 				const int32_t dst_y = request.dstY + yoff;
@@ -2735,7 +2753,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					continue;
 				if (dst_y < 0 || dst_y >= dst_h)
 					continue;
-				for (int32_t xoff = 0; xoff < request.width; xoff++)
+				for (int32_t xoff = start_x; xoff != stop_x; xoff += step_x)
 				{
 					const int32_t src_x = request.srcX + xoff;
 					const int32_t dst_x = request.dstX + xoff;
@@ -2746,6 +2764,20 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					if (!gc.is_clipped(dst_x, dst_y))
 						set_pixel(dst_x, dst_y, get_pixel(src_x, src_y));
 				}
+			}
+
+			if (gc.graphics_exposures)
+			{
+				xEvent event = { .u = {
+					.noExposure = {
+						.drawable = request.dstDrawable,
+						.minorEvent = 0,
+						.majorEvent = X_CopyArea,
+					}
+				}};
+				event.u.u.type = NoExpose;
+				event.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info.output_buffer, event));
 			}
 
 			if (dst_drawable.type == Object::Type::Window)

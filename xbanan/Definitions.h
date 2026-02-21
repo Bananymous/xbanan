@@ -114,6 +114,8 @@ struct Object
 
 		uint32_t font;
 
+		bool graphics_exposures;
+
 		uint32_t clip_mask;
 		int32_t clip_origin_x;
 		int32_t clip_origin_y;

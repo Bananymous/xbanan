@@ -13,7 +13,7 @@
 
 #include <stdint.h>
 
-#if 0
+#if 1
 #undef dprintln
 #define dprintln(...)
 #endif

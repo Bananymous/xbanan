@@ -3,6 +3,8 @@
 #include "SafeGetters.h"
 #include "Utils.h"
 
+#include <BAN/Sort.h>
+
 #include <X11/X.h>
 
 struct DrawSegmentInfo
@@ -105,15 +107,16 @@ BAN::ErrorOr<void> poly_line(Client& client_info, BAN::ConstByteSpan packet)
 	auto request = decode<xPolyLineReq>(packet).value();
 
 	dprintln("PolyLine");
-	dprintln("  drawable: {}", request.drawable);
-	dprintln("  gc:       {}", request.gc);
+	dprintln("  drawable:  {}", request.drawable);
+	dprintln("  gc:        {}", request.gc);
+	dprintln("  coordMode: {}", request.coordMode);
+
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyLine));
+
+	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyLine));
 
 	if (packet.size() < sizeof(xPoint))
 		return {};
-
-	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyFillRectangle));
-
-	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyFillRectangle));
 
 	DrawSegmentInfo info {
 		.out_data_u32 = out_data_u32,
@@ -161,9 +164,9 @@ BAN::ErrorOr<void> poly_segment(Client& client_info, BAN::ConstByteSpan packet)
 	dprintln("  drawable: {}", request.drawable);
 	dprintln("  gc:       {}", request.gc);
 
-	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyFillRectangle));
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolySegment));
 
-	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyFillRectangle));
+	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolySegment));
 
 	DrawSegmentInfo info {
 		.out_data_u32 = out_data_u32,
@@ -191,6 +194,81 @@ BAN::ErrorOr<void> poly_segment(Client& client_info, BAN::ConstByteSpan packet)
 	// TODO: should we invalidate bounding box or once per line?
 	if (g_objects[request.drawable]->type == Object::Type::Window)
 		invalidate_window(request.drawable, info.min_x, info.min_y, info.max_x - info.min_x + 1, info.max_y - info.min_y + 1);
+
+	return {};
+}
+
+BAN::ErrorOr<void> fill_poly(Client& client_info, BAN::ConstByteSpan packet)
+{
+	auto request = decode<xFillPolyReq>(packet).value();
+
+	dprintln("FillPoly");
+	dprintln("  drawable:  {}", request.drawable);
+	dprintln("  gc:        {}", request.gc);
+	dprintln("  shape:     {}", request.shape);
+	dprintln("  coordMode: {}", request.coordMode);
+	
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_FillPoly));
+
+	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_FillPoly));
+
+	if (packet.size() < sizeof(xPoint))
+		return {};
+
+	BAN::Vector<xPoint> points;
+	TRY(points.push_back(decode<xPoint>(packet).value()));
+	while (packet.size() >= sizeof(xPoint))
+	{
+		auto point = decode<xPoint>(packet).value();
+		if (request.coordMode == CoordModePrevious)
+		{
+			point.x += points.back().x;
+			point.y += points.back().y;
+		}
+		TRY(points.push_back(point));
+	}
+
+	int32_t min_x = INT32_MAX, max_x = INT32_MIN;
+	int32_t min_y = INT32_MAX, max_y = INT32_MIN;
+	for (const auto& point : points)
+	{
+		min_x = BAN::Math::min<int32_t>(min_x, point.x);
+		min_y = BAN::Math::min<int32_t>(min_y, point.y);
+		max_x = BAN::Math::max<int32_t>(max_x, point.x);
+		max_y = BAN::Math::max<int32_t>(max_y, point.y);
+	}
+
+	for (int32_t y = min_y; y <= max_y; y++)
+	{
+		BAN::Vector<float> intersections;
+
+		for (size_t i = 0; i < points.size(); i++)
+		{
+			const auto& p1 = points[i];
+			const auto& p2 = points[(i + 1) % points.size()];
+			if (!(BAN::Math::min(p1.y, p2.y) <= y && y < BAN::Math::max(p1.y, p2.y)))
+				continue;
+
+			const float t = static_cast<float>(y - p1.y) / (p2.y - p1.y);
+			if (t < 0.0f || t > 1.0f)
+				continue;
+			TRY(intersections.push_back(p1.x + (p2.x - p1.x) * t));
+		}
+
+		BAN::sort::sort(intersections.begin(), intersections.end());
+
+		for (size_t i = 0; i + 1 < intersections.size(); i += 2)
+		{
+			const int32_t lx = BAN::Math::clamp<int32_t>(BAN::Math::ceil (intersections[i + 0]), 0, out_w);
+			const int32_t rx = BAN::Math::clamp<int32_t>(BAN::Math::floor(intersections[i + 1]), 0, out_w);
+			for (int32_t x = lx; x <= rx; x++)
+				if (!gc.is_clipped(x, y))
+					out_data_u32[y * out_w + x] = gc.foreground;
+		}
+	}
+
+	if (g_objects[request.drawable]->type == Object::Type::Window)
+		invalidate_window(request.drawable, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);	
 
 	return {};
 }

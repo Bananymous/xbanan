@@ -2699,6 +2699,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		case X_PolySegment:
 			TRY(poly_segment(client_info, packet));
 			break;
+		case X_FillPoly:
+			TRY(fill_poly(client_info, packet));
+			break;
 		case X_PolyFillRectangle:
 			TRY(poly_fill_rectangle(client_info, packet));
 			break;

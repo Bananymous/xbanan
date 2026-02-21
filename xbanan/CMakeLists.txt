@@ -8,6 +8,7 @@ set(SOURCES
 	Font.cpp
 	Image.cpp
 	Keymap.cpp
+	SafeGetters.cpp
 )
 
 include(CheckSymbolExists)

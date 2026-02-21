@@ -1,6 +1,7 @@
 #include "Base.h"
 #include "Definitions.h"
 #include "Font.h"
+#include "SafeGetters.h"
 #include "Utils.h"
 
 #include <BAN/Endianness.h>
@@ -500,76 +501,6 @@ static bool matches_pattern(const char* pattern, const char* string)
 	return *string ? false : true;
 }
 
-struct DrawableInfo
-{
-	uint32_t* out_data_u32;
-	uint32_t out_w, out_h;
-};
-
-BAN::ErrorOr<DrawableInfo> get_drawable_info(Client& client_info, CARD32 drawable, BYTE opcode)
-{
-	auto drawable_it = g_objects.find(drawable);
-	if (drawable_it == g_objects.end() || (drawable_it->value->type != Object::Type::Window && drawable_it->value->type != Object::Type::Pixmap))
-	{
-		xError error {
-			.type = X_Error,
-			.errorCode = BadDrawable,
-			.sequenceNumber = client_info.sequence,
-			.resourceID = drawable,
-			.minorCode = 0,
-			.majorCode = opcode,
-		};
-		TRY(encode(client_info.output_buffer, error));
-		return BAN::Error::from_errno(ENOENT);
-	}
-
-	DrawableInfo info;
-
-	switch (drawable_it->value->type)
-	{
-		case Object::Type::Window:
-		{
-			auto& texture = drawable_it->value->object.get<Object::Window>().texture();
-			info.out_data_u32 = texture.pixels().data();
-			info.out_w = texture.width();
-			info.out_h = texture.height();
-			break;
-		}
-		case Object::Type::Pixmap:
-		{
-			auto& pixmap = drawable_it->value->object.get<Object::Pixmap>();
-			info.out_data_u32 = reinterpret_cast<uint32_t*>(pixmap.data.data());
-			info.out_w = pixmap.width;
-			info.out_h = pixmap.height;
-			break;
-		}
-		default:
-			ASSERT_NOT_REACHED();
-	}
-
-	return info;
-}
-
-static BAN::ErrorOr<Object::GraphicsContext&> get_gc(Client& client_info, CARD32 gc, BYTE opcode)
-{
-	auto it = g_objects.find(gc);
-	if (it == g_objects.end() || it->value->type != Object::Type::GraphicsContext)
-	{
-		xError error {
-			.type = X_Error,
-			.errorCode = BadGC,
-			.sequenceNumber = client_info.sequence,
-			.resourceID = gc,
-			.minorCode = 0,
-			.majorCode = opcode,
-		};
-		TRY(encode(client_info.output_buffer, error));
-		return BAN::Error::from_errno(ENOENT);
-	}
-
-	return it->value->object.get<Object::GraphicsContext>();
-}
-
 static BAN::ErrorOr<BAN::RefPtr<PCFFont>> get_fontable(Client& client_info, CARD32 fid, BYTE opcode)
 {
 	auto it = g_objects.find(fid);
@@ -809,7 +740,7 @@ BAN::ErrorOr<void> poly_text(Client& client_info, BAN::ConstByteSpan packet, boo
 	dprintln("  x:        {}", request.x);
 	dprintln("  y:        {}", request.y);
 
-	auto [out_data_u32, out_w, out_h] = TRY(get_drawable_info(client_info, request.drawable, opcode));
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, opcode));
 
 	const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
 
@@ -880,7 +811,7 @@ BAN::ErrorOr<void> image_text(Client& client_info, BAN::ConstByteSpan packet, bo
 	dprintln("  x:        {}", request.x);
 	dprintln("  y:        {}", request.y);
 
-	auto [out_data_u32, out_w, out_h] = TRY(get_drawable_info(client_info, request.drawable, opcode));
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, opcode));
 
 	const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
 

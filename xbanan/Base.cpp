@@ -3,6 +3,7 @@
 #include "Font.h"
 #include "Image.h"
 #include "Keymap.h"
+#include "SafeGetters.h"
 #include "Utils.h"
 
 #include <X11/X.h>
@@ -1085,77 +1086,7 @@ static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::K
 
 BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 {
-	struct DrawableInfo
-	{
-		BAN::ByteSpan data;
-		CARD32 w, h;
-		CARD8 depth;
-	};
-
 	const uint8_t opcode = packet[0];
-
-	const auto get_window =
-		[&client_info, opcode](WINDOW wid) -> BAN::ErrorOr<Object::Window&>
-		{
-			auto it = g_objects.find(wid);
-			if (it == g_objects.end() || it->value->type != Object::Type::Window)
-			{
-				xError error {
-					.type = X_Error,
-					.errorCode = BadWindow,
-					.sequenceNumber = client_info.sequence,
-					.resourceID = wid,
-					.minorCode = 0,
-					.majorCode = opcode,
-				};
-				TRY(encode(client_info.output_buffer, error));
-				return BAN::Error::from_errno(ENOENT);
-			}
-
-			return it->value->object.get<Object::Window>();
-		};
-
-	const auto get_pixmap =
-		[&client_info, opcode](WINDOW wid) -> BAN::ErrorOr<Object::Pixmap&>
-		{
-			auto it = g_objects.find(wid);
-			if (it == g_objects.end() || it->value->type != Object::Type::Pixmap)
-			{
-				xError error {
-					.type = X_Error,
-					.errorCode = BadPixmap,
-					.sequenceNumber = client_info.sequence,
-					.resourceID = wid,
-					.minorCode = 0,
-					.majorCode = opcode,
-				};
-				TRY(encode(client_info.output_buffer, error));
-				return BAN::Error::from_errno(ENOENT);
-			}
-
-			return it->value->object.get<Object::Pixmap>();
-		};
-
-	const auto get_drawable =
-		[&client_info, opcode](WINDOW drawable) -> BAN::ErrorOr<Object&>
-		{
-			auto it = g_objects.find(drawable);
-			if (it == g_objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
-			{
-				xError error {
-					.type = X_Error,
-					.errorCode = BadDrawable,
-					.sequenceNumber = client_info.sequence,
-					.resourceID = drawable,
-					.minorCode = 0,
-					.majorCode = opcode,
-				};
-				TRY(encode(client_info.output_buffer, error));
-				return BAN::Error::from_errno(ENOENT);
-			}
-
-			return *it->value;
-		};
 
 	const auto validate_atom =
 		[&client_info, opcode](ATOM atom) -> BAN::ErrorOr<void>
@@ -1184,43 +1115,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			if (it == g_atoms_id_to_name.end())
 				return "<INVALID ATOM>";
 			return it->value.sv();
-		};
-
-	const auto get_drawable_info =
-		[](Object& object) -> DrawableInfo
-		{
-			DrawableInfo info;
-
-			switch (object.type)
-			{
-				case Object::Type::Window:
-				{
-					auto& window = object.object.get<Object::Window>();
-					auto& texture = window.texture();
-
-					info.data = { reinterpret_cast<uint8_t*>(texture.pixels().data()), texture.pixels().size() * 4 };
-					info.w = texture.width();
-					info.h = texture.height();
-					info.depth = window.depth;
-
-					break;
-				}
-				case Object::Type::Pixmap:
-				{
-					auto& pixmap = object.object.get<Object::Pixmap>();
-
-					info.data = pixmap.data;
-					info.w = pixmap.width;
-					info.h = pixmap.height;
-					info.depth = pixmap.depth;
-
-					break;
-				}
-				default:
-					ASSERT_NOT_REACHED();
-			}
-
-			return info;
 		};
 
 	client_info.sequence++;
@@ -1408,7 +1302,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln(" window:    {}", request.window);
 			dprintln(" valueMask: {8h}", request.valueMask);
 
-			auto& window = TRY_REF(get_window(request.window));
+			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
 			CURSOR cursor_id = None;
 
@@ -1469,7 +1363,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("GetWindowAttributes");
 			dprintln("  window: {}", wid);
 
-			const auto& window = TRY_REF(get_window(wid));
+			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
 			xGetWindowAttributesReply reply {
 				.type = X_Reply,
@@ -1502,7 +1396,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("DestroyWinow");
 			dprintln("  window: {}", wid);
 
-			(void)TRY_REF(get_window(wid));
+			(void)TRY_REF(get_window(client_info, wid, opcode));
 			TRY(destroy_window(client_info, wid));
 
 			break;
@@ -1517,9 +1411,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  x:      {}", request.x);
 			dprintln("  y:      {}", request.y);
 
-			auto& window = TRY_REF(get_window(request.window));
-			auto& new_parent = TRY_REF(get_window(request.parent));
-			auto& old_parent = TRY_REF(get_window(window.parent));
+			auto& window     = TRY_REF(get_window(client_info, request.window, opcode));
+			auto& new_parent = TRY_REF(get_window(client_info, request.parent, opcode));
+			auto& old_parent = TRY_REF(get_window(client_info, window.parent,  opcode));
 
 			const auto wid = request.window;
 			const auto oldpwid = window.parent;
@@ -1589,7 +1483,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("MapWindow");
 			dprintln("  window: {}", wid);
 
-			(void)TRY_REF(get_window(wid));
+			(void)TRY_REF(get_window(client_info, wid, opcode));
 			TRY(map_window(client_info, wid));
 
 			break;
@@ -1601,7 +1495,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("MapSubwindows");
 			dprintln("  window: {}", wid);
 
-			const auto& window = TRY_REF(get_window(wid));
+			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 			for (auto child_wid : window.children)
 				TRY(map_window(client_info, child_wid));
 
@@ -1614,7 +1508,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("UnmapWindow");
 			dprintln("  window: {}", wid);
 
-			(void)TRY_REF(get_window(wid));
+			(void)TRY_REF(get_window(client_info, wid, opcode));
 			TRY(unmap_window(client_info, wid));
 
 			break;
@@ -1626,7 +1520,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("UnmapSubwindows");
 			dprintln("  window: {}", wid);
 
-			const auto& window = TRY_REF(get_window(wid));
+			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 			for (auto child_wid : window.children)
 				TRY(unmap_window(client_info, child_wid));
 
@@ -1639,7 +1533,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("ConfigureWindow");
 			dprintln("  window: {}", request.window);
 
-			auto& window = TRY_REF(get_window(request.window));
+			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 			auto& texture = window.texture();
 
 			int32_t new_x = window.x;
@@ -1764,7 +1658,22 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("GetGeometry");
 			dprintln("  drawable: {}", drawable_id);
 
-			const auto& drawable = TRY_REF(get_drawable(drawable_id));
+			auto it = g_objects.find(drawable_id);
+			if (it == g_objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = BadDrawable,
+					.sequenceNumber = client_info.sequence,
+					.resourceID = drawable_id,
+					.minorCode = 0,
+					.majorCode = opcode,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				return {};
+			}
+
+			const auto& drawable = *it->value;
 
 			INT16 x, y;
 			CARD16 width, height;
@@ -1824,7 +1733,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("QueryTree");
 			dprintln("  window: {}", wid);
 
-			const auto& window = TRY_REF(get_window(wid));
+			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
 			xQueryTreeReply reply {
 				.type = X_Reply,
@@ -1914,7 +1823,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			ASSERT(request.format == 8 || request.format == 16 || request.format == 32);
 
-			auto& window = TRY_REF(get_window(request.window));
+			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
 			auto it = window.properties.find(request.property);
 			if (it == window.properties.end())
@@ -1978,7 +1887,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  window:   {}", request.window);
 			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
 
-			auto& window = TRY_REF(get_window(request.window));
+			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
 			auto it = window.properties.find(request.property);
 			if (it == window.properties.end())
@@ -2015,7 +1924,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  longOffset: {}", request.longOffset);
 			dprintln("  longLength: {}", request.longLength);
 
-			auto& window = TRY_REF(get_window(request.window));
+			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
 			auto it = window.properties.find(request.property);
 			if (it == window.properties.end())
@@ -2098,7 +2007,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("ListProperties");
 			dprintln("  window:    {}", wid);
 
-			const auto& window = TRY_REF(get_window(wid));
+			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
 			xListPropertiesReply reply {
 				.type = X_Reply,
@@ -2348,7 +2257,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("QueryPointer");
 			dprintln("  window: {}", wid);
 
-			const auto& window = TRY_REF(get_window(wid));
+			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
 			int32_t root_x, root_y;
 			int32_t event_x, event_y;
@@ -2482,7 +2391,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("FreePixmap");
 			dprintln("  pixmap: {}", pid);
 
-			(void)TRY_REF(get_pixmap(pid));
+			(void)TRY_REF(get_pixmap(client_info, pid, opcode));
 			client_info.objects.remove(pid);
 			g_objects.remove(pid);
 
@@ -2659,6 +2568,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("FreeGC");
 			dprintln("  gc: {}", gc);
 
+			(void)TRY_REF(get_gc(client_info, gc, opcode));
 			client_info.objects.remove(gc);
 			g_objects.remove(gc);
 
@@ -2676,10 +2586,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  width:     {}", request.width);
 			dprintln("  height:    {}", request.height);
 
-			auto& object = *g_objects[request.window];
-			ASSERT(object.type == Object::Type::Window);
-
-			auto& texture = object.object.get<Object::Window>().texture();
+			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
+			auto& texture = window.texture();
 
 			if (request.width == 0)
 				request.width = texture.width() - request.x;
@@ -2706,71 +2614,21 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  width:       {}", request.width);
 			dprintln("  heigth:      {}", request.height);
 
-			auto& src_drawable = TRY_REF(get_drawable(request.srcDrawable));
-			auto [src_data, src_w, src_h, src_depth] = get_drawable_info(src_drawable);
+			auto [src_data_u32, src_w, src_h, _] = TRY(get_drawable_info(client_info, request.srcDrawable, opcode));
+			auto [dst_data_u32, dst_w, dst_h, _] = TRY(get_drawable_info(client_info, request.dstDrawable, opcode));
 
-			auto& dst_drawable = TRY_REF(get_drawable(request.dstDrawable));
-			auto [dst_data, dst_w, dst_h, dst_depth] = get_drawable_info(dst_drawable);
-
-			auto& gc_object = *g_objects[request.gc];
-			ASSERT(gc_object.type == Object::Type::GraphicsContext);
-			auto& gc = gc_object.object.get<Object::GraphicsContext>();
+			const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
 
 			const auto get_pixel =
-				[&](int32_t x, int32_t y) -> uint32_t
+				[src_data_u32, src_w](int32_t x, int32_t y) -> uint32_t
 				{
-					const int32_t index = y * src_w + x;
-					const auto src_data_u32 = src_data.as_span<uint32_t>();
-					return src_data_u32[index];
-
-					switch (src_depth)
-					{
-						case 1:
-						{
-							const int32_t byte = index / 8;
-							const int32_t bit = index % 8;
-							return (src_data[byte] & (1 << bit)) ? 0xFFFFFF : 0x000000;
-						}
-						case 24:
-						case 32:
-						{
-							const auto src_data_u32 = src_data.as_span<uint32_t>();
-							return src_data_u32[index];
-						}
-						default:
-							ASSERT_NOT_REACHED();
-					}	
+					return src_data_u32[y * src_w + x];
 				};
 
 			const auto set_pixel =
-				[&](int32_t x, int32_t y, uint32_t color) -> void
+				[dst_data_u32, dst_w](int32_t x, int32_t y, uint32_t color) -> void
 				{
-					const int32_t index = y * dst_w + x;
-					const auto dst_data_u32 = dst_data.as_span<uint32_t>();
-					dst_data_u32[index] = color;
-
-					switch (dst_depth)
-					{
-						case 1:
-						{
-							const int32_t byte = index / 8;
-							const int32_t bit = index % 8;
-							if (color)
-								dst_data[byte] |=  (1 << bit);
-							else
-								dst_data[byte] &= ~(1 << bit);
-							break;
-						}
-						case 24:
-						case 32:
-						{
-							const auto dst_data_u32 = dst_data.as_span<uint32_t>();
-							dst_data_u32[index] = color;
-							break;
-						}
-						default:
-							ASSERT_NOT_REACHED();
-					}	
+					dst_data_u32[y * dst_w + x] = color;
 				};
 
 			const int32_t start_x = request.srcX < request.dstX ? request.width - 1 : 0;
@@ -2816,7 +2674,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				TRY(encode(client_info.output_buffer, event));
 			}
 
-			if (dst_drawable.type == Object::Type::Window)
+			if (g_objects[request.dstDrawable]->type == Object::Type::Window)
 				invalidate_window(request.dstDrawable, request.dstX, request.dstY, request.width, request.height);
 
 			break;
@@ -2829,14 +2687,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  drawable: {}", request.drawable);
 			dprintln("  gc:       {}", request.gc);
 
-			auto& gc_object = *g_objects[request.gc];
-			ASSERT(gc_object.type == Object::Type::GraphicsContext);
-			auto& gc = gc_object.object.get<Object::GraphicsContext>();
+			auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, opcode));
 
-			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
-
-			auto& drawable = TRY_REF(get_drawable(request.drawable));
-			auto [data, w, h, depth] = get_drawable_info(drawable);
+			const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
+			const auto foreground = gc.foreground;
 
 			dprintln("  rects:");
 			while (!packet.empty())
@@ -2849,16 +2703,15 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 				const int32_t min_x = BAN::Math::max<int32_t>(rect.x, 0);
 				const int32_t min_y = BAN::Math::max<int32_t>(rect.y, 0);
-				const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width, w);
-				const int32_t max_y = BAN::Math::min<int32_t>(rect.y + rect.height, h);
+				const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width, out_w);
+				const int32_t max_y = BAN::Math::min<int32_t>(rect.y + rect.height, out_h);
 
-				auto* data_u32 = data.as_span<uint32_t>().data();
 				for (int32_t y = min_y; y < max_y; y++)
 					for (int32_t x = min_x; x < max_x; x++)
 						if (!gc.is_clipped(x, y))
-							data_u32[y * w + x] = foreground;
+							out_data_u32[y * out_w + x] = foreground;
 
-				if (drawable.type == Object::Type::Window)
+				if (g_objects[request.drawable]->type == Object::Type::Window)
 					invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
 			}
 
@@ -2872,16 +2725,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  drawable: {}", request.drawable);
 			dprintln("  gc:       {}", request.gc);
 
-			auto& gc_object = *g_objects[request.gc];
-			ASSERT(gc_object.type == Object::Type::GraphicsContext);
-			auto& gc = gc_object.object.get<Object::GraphicsContext>();
+			auto [out_data_32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, opcode));
 
-			const auto foreground = gc_object.object.get<Object::GraphicsContext>().foreground;
-
-			auto& object = *g_objects[request.drawable];
-			ASSERT(object.type == Object::Type::Window);
-
-			auto& texture = object.object.get<Object::Window>().texture();
+			auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyFillArc));
+			const auto foreground = gc.foreground;
 
 			const auto normalize_angle =
 				[](float f) -> float
@@ -2906,8 +2753,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				const int32_t min_x = BAN::Math::max<int32_t>(0, arc.x);
 				const int32_t min_y = BAN::Math::max<int32_t>(0, arc.y);
 				
-				const int32_t max_x = BAN::Math::min<int32_t>(texture.width(),  arc.x + arc.width);
-				const int32_t max_y = BAN::Math::min<int32_t>(texture.height(), arc.y + arc.height);
+				const int32_t max_x = BAN::Math::min<int32_t>(out_w, arc.x + arc.width);
+				const int32_t max_y = BAN::Math::min<int32_t>(out_h, arc.y + arc.height);
 
 				const auto rx = arc.width / 2;
 				const auto ry = arc.height / 2;
@@ -2947,12 +2794,13 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 							}
 						}
 
-						if (gc.is_clipped(x, y))
-							texture.set_pixel(x, y, foreground);
+						if (!gc.is_clipped(x, y))
+							out_data_32[y * out_w + x] = foreground;
 					}
 				}
 
-				invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
+				if (g_objects[request.drawable]->type == Object::Type::Window)
+					invalidate_window(request.drawable, min_x, min_y, max_x - min_x, max_y - min_y);
 			}
 
 			break;
@@ -2973,12 +2821,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  height:   {}", request.height);
 #endif
 
-			auto& object = TRY_REF(get_drawable(request.drawable));
-			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
 
-			auto& gc_object = *g_objects[request.gc];
-			ASSERT(gc_object.type == Object::Type::GraphicsContext);
-			auto& gc = gc_object.object.get<Object::GraphicsContext>();
+			auto [out_data, out_w, out_h, out_depth] = TRY(get_drawable_info(client_info, request.drawable, opcode));
+
+			const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
 
 			if (packet.empty())
 			{
@@ -2987,7 +2833,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			}
 
 			put_image({
-				.out_data = out_data.data(),
+				.out_data = out_data,
 				.out_x = request.dstX,
 				.out_y = request.dstY,
 				.out_w = out_w,
@@ -3006,7 +2852,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.gc = gc,
 			});
 
-			if (object.type == Object::Type::Window)
+			if (g_objects[request.drawable]->type == Object::Type::Window)
 				invalidate_window(request.drawable, request.dstX, request.dstY, request.width, request.height);
 
 			break;
@@ -3024,8 +2870,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  height:    {}", request.height);
 			dprintln("  planeMask: {}", request.planeMask);
 
-			auto& object = *g_objects[request.drawable];
-			auto [in_data, in_w, in_h, in_depth] = get_drawable_info(object);
+			auto [in_data, in_w, in_h, in_depth] = TRY(get_drawable_info(client_info, request.drawable, opcode));
 
 			const auto dwords = image_dwords(request.width, request.height, in_depth);
 
@@ -3045,7 +2890,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			get_image({
 				.out_data = out_data,
-				.in_data = in_data.data(),
+				.in_data = in_data,
 				.in_x = request.x,
 				.in_y = request.y,
 				.in_w = in_w,
@@ -3200,7 +3045,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  x:         {}", request.x);
 			dprintln("  y:         {}", request.y);
 
-			const auto& source = TRY_REF(get_pixmap(request.source));
+			const auto& source = TRY_REF(get_pixmap(client_info, request.source, opcode));
 			ASSERT(source.depth == 1);
 
 			const uint32_t foreground =
@@ -3226,7 +3071,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			if (request.mask != None)
 			{
-				const auto& mask = TRY_REF(get_pixmap(request.mask));
+				const auto& mask = TRY_REF(get_pixmap(client_info, request.mask, opcode));
 				ASSERT(mask.depth == 1);
 				ASSERT(mask.width == source.width);
 				ASSERT(mask.height == source.height);

@@ -1,6 +1,7 @@
 #include "Base.h"
 #include "Extensions.h"
 #include "Image.h"
+#include "SafeGetters.h"
 #include "Utils.h"
 
 #include <X11/X.h>
@@ -42,100 +43,34 @@ static bool is_local_socket(int socket)
 	return false;
 }
 
+static BAN::ErrorOr<void*> get_shmseg(Client& client_info, CARD32 shmseg, BYTE op_major, BYTE op_minor)
+{
+	auto it = g_objects.find(shmseg);
+	if (it != g_objects.end() && it->value->type == Object::Type::Extension)
+	{
+		auto& ext = it->value->object.get<Object::Extension>();
+		if (ext.type_major == s_shm_major_opcode && ext.type_minor == BadShmSeg)
+			return ext.c_private;
+	}
+
+	xError error {
+		.type = X_Error,
+		.errorCode = static_cast<BYTE>(s_shm_error_base + BadShmSeg),
+		.sequenceNumber = client_info.sequence,
+		.resourceID = shmseg,
+		.minorCode = op_minor,
+		.majorCode = op_major,
+	};
+	TRY(encode(client_info.output_buffer, error));
+	return BAN::Error::from_errno(ENOENT);
+}
+
 static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan packet)
 {
-	struct DrawableInfo
-	{
-		BAN::ByteSpan data;
-		CARD32 w, h;
-		CARD8 depth;
-	};
+	const uint8_t op_major = packet[0];
+	const uint8_t op_minor = packet[1];
 
-	const uint8_t major_opcode = packet[0];
-	const uint8_t minor_opcode = packet[1];
-
-	const auto get_shmseg =
-		[&client_info, minor_opcode, major_opcode](CARD32 shmseg) -> BAN::ErrorOr<void*>
-		{
-			auto it = g_objects.find(shmseg);
-			if (it != g_objects.end() && it->value->type == Object::Type::Extension)
-			{
-				auto& ext = it->value->object.get<Object::Extension>();
-				if (ext.type_major == s_shm_major_opcode && ext.type_minor == BadShmSeg)
-					return ext.c_private;
-			}
-
-			xError error {
-				.type = X_Error,
-				.errorCode = static_cast<BYTE>(s_shm_error_base + BadShmSeg),
-				.sequenceNumber = client_info.sequence,
-				.resourceID = shmseg,
-				.minorCode = minor_opcode,
-				.majorCode = major_opcode,
-			};
-			TRY(encode(client_info.output_buffer, error));
-			return BAN::Error::from_errno(ENOENT);
-		};
-
-	const auto get_drawable =
-		[&client_info, minor_opcode, major_opcode](WINDOW drawable) -> BAN::ErrorOr<Object&>
-		{
-			auto it = g_objects.find(drawable);
-			if (it == g_objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
-			{
-				xError error {
-					.type = X_Error,
-					.errorCode = BadDrawable,
-					.sequenceNumber = client_info.sequence,
-					.resourceID = drawable,
-					.minorCode = minor_opcode,
-					.majorCode = major_opcode,
-				};
-				TRY(encode(client_info.output_buffer, error));
-				return BAN::Error::from_errno(ENOENT);
-			}
-
-			return *it->value;
-		};
-
-	const auto get_drawable_info =
-		[](Object& object) -> DrawableInfo
-		{
-			DrawableInfo info;
-
-			switch (object.type)
-			{
-				case Object::Type::Window:
-				{
-					auto& window = object.object.get<Object::Window>();
-					auto& texture = window.texture();
-
-					info.data = { reinterpret_cast<uint8_t*>(texture.pixels().data()), texture.pixels().size() * 4 };
-					info.w = texture.width();
-					info.h = texture.height();
-					info.depth = window.depth;
-
-					break;
-				}
-				case Object::Type::Pixmap:
-				{
-					auto& pixmap = object.object.get<Object::Pixmap>();
-
-					info.data = pixmap.data;
-					info.w = pixmap.width;
-					info.h = pixmap.height;
-					info.depth = pixmap.depth;
-
-					break;
-				}
-				default:
-					ASSERT_NOT_REACHED();
-			}
-
-			return info;
-		};
-
-	switch (packet[1])
+	switch (op_minor)
 	{
 		case X_ShmQueryVersion:
 		{
@@ -200,7 +135,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 			dprintln("ShmDetach");
 			dprintln("  shmseg:   {}", request.shmseg);
 
-			void* shm_segment = TRY(get_shmseg(request.shmseg));
+			void* shm_segment = TRY(get_shmseg(client_info, request.shmseg, op_major, op_minor));
 			shmdt(shm_segment);
 
 			client_info.objects.remove(request.shmseg);
@@ -231,17 +166,14 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 			dprintln("  offset:      {}", request.offset);
 #endif
 
-			void* shm_segment = TRY(get_shmseg(request.shmseg));
+			void* shm_segment = TRY(get_shmseg(client_info, request.shmseg, op_major, op_minor));
 
-			auto& object = TRY_REF(get_drawable(request.drawable));
-			auto [out_data, out_w, out_h, out_depth] = get_drawable_info(object);
+			auto [out_data, out_w, out_h, out_depth] = TRY(get_drawable_info(client_info, request.drawable, op_major, op_minor));
 
-			auto& gc_object = *g_objects[request.gc];
-			ASSERT(gc_object.type == Object::Type::GraphicsContext);
-			auto& gc = gc_object.object.get<Object::GraphicsContext>();
+			const auto& gc = TRY_REF(get_gc(client_info, request.gc, op_major, op_minor));
 
 			put_image({
-				.out_data = out_data.data(),
+				.out_data = out_data,
 				.out_x = request.dstX,
 				.out_y = request.dstY,
 				.out_w = out_w,
@@ -260,7 +192,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.gc = gc,
 			});
 
-			if (object.type == Object::Type::Window)
+			if (g_objects[request.drawable]->type == Object::Type::Window)
 				invalidate_window(request.drawable, request.dstX, request.dstY, request.srcWidth, request.srcHeight);
 
 			if (request.sendEvent)
@@ -292,16 +224,15 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 			dprintln("  shmseg:    {}", request.shmseg);
 			dprintln("  offset:    {}", request.offset);
 
-			void* shm_segment = TRY(get_shmseg(request.shmseg));
+			void* shm_segment = TRY(get_shmseg(client_info, request.shmseg, op_major, op_minor));
 
-			auto& object = TRY_REF(get_drawable(request.drawable));
-			auto [in_data, in_w, in_h, in_depth] = get_drawable_info(object);
+			auto [in_data, in_w, in_h, in_depth] = TRY(get_drawable_info(client_info, request.drawable, op_major, op_minor));
 
 			const auto dwords = image_dwords(request.width, request.height, in_depth);
 
 			get_image({
 				.out_data = (uint8_t*)shm_segment + request.offset,
-				.in_data = in_data.data(),
+				.in_data = in_data,
 				.in_x = request.x,
 				.in_y = request.y,
 				.in_w = in_w,
@@ -339,7 +270,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 
 			ASSERT(request.depth == 24 || request.depth == 32);
 
-			void* shm_segment = TRY(get_shmseg(request.shmseg));
+			void* shm_segment = TRY(get_shmseg(client_info, request.shmseg, op_major, op_minor));
 
 			TRY(client_info.objects.insert(request.pid));
 			TRY(g_objects.insert(

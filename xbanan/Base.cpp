@@ -2628,8 +2628,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  width:       {}", request.width);
 			dprintln("  heigth:      {}", request.height);
 
-			auto [src_data_u32, src_w, src_h, _] = TRY(get_drawable_info(client_info, request.srcDrawable, opcode));
-			auto [dst_data_u32, dst_w, dst_h, _] = TRY(get_drawable_info(client_info, request.dstDrawable, opcode));
+			auto [src_data_u32, src_w, src_h, _1] = TRY(get_drawable_info(client_info, request.srcDrawable, opcode));
+			auto [dst_data_u32, dst_w, dst_h, _2] = TRY(get_drawable_info(client_info, request.dstDrawable, opcode));
 
 			const auto& gc = TRY_REF(get_gc(client_info, request.gc, opcode));
 

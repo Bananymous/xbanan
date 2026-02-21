@@ -104,7 +104,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				{
 					auto& pixmap = object.object.get<Object::Pixmap>();
 
-					info.data = pixmap.data.span();
+					info.data = pixmap.data;
 					info.w = pixmap.width;
 					info.h = pixmap.height;
 					info.depth = pixmap.depth;
@@ -302,6 +302,40 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.size = dwords * 4,
 			};
 			TRY(encode(client_info.output_buffer, reply));
+
+			break;
+		}
+		case X_ShmCreatePixmap:
+		{
+			auto request = decode<xShmCreatePixmapReq>(packet).value();
+
+			dprintln("ShmCreatePixmap");
+			dprintln("  depth:    {}", request.depth);
+			dprintln("  pid:      {}", request.pid);
+			dprintln("  drawable: {}", request.drawable);
+			dprintln("  width:    {}", request.width);
+			dprintln("  height:   {}", request.height);
+			dprintln("  shmseg:   {}", request.shmseg);
+			dprintln("  offset:   {}", request.offset);
+
+			ASSERT(request.depth == 24 || request.depth == 32);
+
+			void* shm_segment = TRY(get_shmseg(request.shmseg));
+
+			TRY(client_info.objects.insert(request.pid));
+			TRY(g_objects.insert(
+				request.pid,
+				TRY(BAN::UniqPtr<Object>::create(Object {
+					.type = Object::Type::Pixmap,
+					.object = Object::Pixmap {
+						.depth = request.depth,
+						.width = request.width,
+						.height = request.height,
+						.data = BAN::ByteSpan(static_cast<uint8_t*>(shm_segment) + request.offset, request.width * request.height * 4),
+						.owned_data = {},
+					}
+				}))
+			));
 
 			break;
 		}

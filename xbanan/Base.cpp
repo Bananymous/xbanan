@@ -1208,7 +1208,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				{
 					auto& pixmap = object.object.get<Object::Pixmap>();
 
-					info.data = pixmap.data.span();
+					info.data = pixmap.data;
 					info.w = pixmap.width;
 					info.h = pixmap.height;
 					info.depth = pixmap.depth;
@@ -2439,7 +2439,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						.depth = request.depth,
 						.width = request.width,
 						.height = request.height,
-						.data = BAN::move(data),
+						.data = data.span(),
+						.owned_data = BAN::move(data),
 					}
 				}))
 			));

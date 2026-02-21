@@ -11,6 +11,7 @@
 
 #include <X11/X.h>
 
+#include <ctype.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
@@ -465,40 +466,38 @@ static void initialize_fonts()
 	printf("found %zu fonts and aliases\n", s_available_fonts.size());
 }
 
-static bool matches_pattern(const char* pattern, const char* string)
+static bool matches_pattern(BAN::StringView pattern, BAN::StringView string)
 {
-	while (*pattern)
+	while (!pattern.empty())
 	{
-		switch (*pattern)
+		switch (pattern.front())
 		{
 			case '*':
 			{
-				const char* ptr = string + strlen(string);
-				while (ptr >= string)
-					if (matches_pattern(pattern + 1, ptr--) == 0)
-						return 0;
+				ssize_t len = string.size();
+				while (len >= 0)
+					if (matches_pattern(pattern.substring(1), string.substring(len--)))
+						return true;
 				return false;
 			}
 			case '?':
 			{
-				if (*string == '\0')
+				if (string.empty())
 					return false;
-				pattern++;
-				string++;
+				pattern = pattern.substring(1);
+				string = string.substring(1);
 				continue;
 			}
 		}
 
-		if (*pattern == '\0')
-			break;
-
-		if (*pattern != *string)
+		if (string.empty() || tolower(pattern.front()) != tolower(string.front()))
 			return false;
-		pattern++;
-		string++;
+
+		pattern = pattern.substring(1);
+		string = string.substring(1);
 	}
 
-	return *string ? false : true;
+	return string.empty();
 }
 
 static BAN::ErrorOr<BAN::RefPtr<PCFFont>> get_fontable(Client& client_info, CARD32 fid, BYTE opcode)
@@ -535,7 +534,7 @@ BAN::ErrorOr<void> open_font(Client& client_info, BAN::ConstByteSpan packet)
 
 	for (const auto& [name, path] : s_available_fonts)
 	{
-		if (!matches_pattern(pattern.data(), name.data()))
+		if (!matches_pattern(pattern, name))
 			continue;
 
 		BAN::RefPtr<PCFFont> font;
@@ -640,7 +639,7 @@ BAN::ErrorOr<void> list_fonts(Client& client_info, BAN::ConstByteSpan packet)
 	{
 		if (nfonts == request.maxNames)
 			break;
-		if (!matches_pattern(pattern.data(), name.data()))
+		if (!matches_pattern(pattern, name))
 			continue;
 		TRY(encode<BYTE>(result, name.size()));
 		TRY(encode(result, name));
@@ -654,7 +653,79 @@ BAN::ErrorOr<void> list_fonts(Client& client_info, BAN::ConstByteSpan packet)
 		.nFonts = nfonts,
 	};
 	TRY(encode(client_info.output_buffer, reply));
+
 	TRY(encode(client_info.output_buffer, result));
+	for (size_t i = 0; (result.size() + i) % 4; i++)
+		TRY(encode(client_info.output_buffer, '\0'));
+
+	return {};
+}
+
+BAN::ErrorOr<void> list_fonts_with_info(Client& client_info, BAN::ConstByteSpan packet)
+{
+	auto request = decode<xListFontsWithInfoReq>(packet).value();
+
+	BAN::String pattern = BAN::StringView((char*)packet.data(), request.nbytes);
+
+	dprintln("ListFontsWithInfo");
+	dprintln("  maxNames: {}", request.maxNames);
+	dprintln("  pattern:  {}", pattern);
+
+	size_t nfonts = 0;
+	for (const auto& [name, path] : s_available_fonts)
+	{
+		if (nfonts == request.maxNames)
+			break;
+		if (!matches_pattern(pattern, name))
+			continue;
+
+		BAN::RefPtr<PCFFont> font;
+		if (auto it = s_loaded_fonts.find(path); it != s_loaded_fonts.end())
+			font = it->value.lock();
+
+		if (!font)
+		{
+			auto font_or_error = parse_font(path);
+			if (font_or_error.is_error())
+				continue;
+			font = font_or_error.release_value();
+		}
+
+		xListFontsWithInfoReply reply {
+			.type = X_Reply,
+			.nameLength = static_cast<BYTE>(name.size()),
+			.sequenceNumber = client_info.sequence,
+			.length = static_cast<CARD32>(7 + (name.size() + 3) / 4),
+			.minBounds = font->min_bounds,
+			.maxBounds = font->max_bounds,
+			.minCharOrByte2 = font->min_char_or_byte2,
+			.maxCharOrByte2 = font->max_char_or_byte2,
+			.defaultChar = font->default_char,
+			.nFontProps = 0, // TODO
+			.drawDirection = FontLeftToRight,
+			.minByte1 = font->min_byte1,
+			.maxByte1 = font->max_byte1,
+			.allCharsExist = font->all_chars_exist,
+			.fontAscent = font->font_ascent,
+			.fontDescent = font->font_descent,
+			.nReplies = 1,
+		};
+		TRY(encode(client_info.output_buffer, reply));
+
+		TRY(encode(client_info.output_buffer, name));
+		for (size_t i = 0; (name.size() + i) % 4; i++)
+			TRY(encode(client_info.output_buffer, '\0'));
+
+		nfonts++;
+	}
+
+	xListFontsWithInfoReply reply {
+		.type = X_Reply,
+		.nameLength = 0,
+		.sequenceNumber = client_info.sequence,
+		.length = 7,
+	};
+	TRY(encode(client_info.output_buffer, reply));
 
 	return {};
 }

@@ -2333,6 +2333,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		case X_ListFonts:
 			TRY(list_fonts(client_info, packet));
 			break;
+		case X_ListFontsWithInfo:
+			TRY(list_fonts_with_info(client_info, packet));
+			break;
 		case X_GetInputFocus:
 		{
 			dprintln("GetInputFocus");

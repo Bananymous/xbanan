@@ -65,6 +65,7 @@ BAN::ErrorOr<void> open_font(Client& client_info, BAN::ConstByteSpan packet);
 BAN::ErrorOr<void> close_font(Client& client_info, BAN::ConstByteSpan packet);
 BAN::ErrorOr<void> query_font(Client& client_info, BAN::ConstByteSpan packet);
 BAN::ErrorOr<void> list_fonts(Client& client_info, BAN::ConstByteSpan packet);
+BAN::ErrorOr<void> list_fonts_with_info(Client& client_info, BAN::ConstByteSpan packet);
 BAN::ErrorOr<void> poly_text(Client& client_info, BAN::ConstByteSpan packet, bool wide);
 BAN::ErrorOr<void> image_text(Client& client_info, BAN::ConstByteSpan packet, bool wide);
 BAN::ErrorOr<void> create_glyph_cursor(Client& client_info, BAN::ConstByteSpan packet);

@@ -101,7 +101,19 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 			dprintln("  readOnly: {}", request.readOnly);
 
 			void* addr = shmat(request.shmid, nullptr, request.readOnly ? SHM_RDONLY : 0);
-			ASSERT(addr != (void*)-1);
+			if (addr == (void*)-1)
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = static_cast<BYTE>(s_shm_error_base + BadShmSeg),
+					.sequenceNumber = client_info.sequence,
+					.resourceID = request.shmseg,
+					.minorCode = op_minor,
+					.majorCode = op_major,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				return {};
+			}
 
 			TRY(client_info.objects.insert(request.shmseg));
 			TRY(g_objects.insert(

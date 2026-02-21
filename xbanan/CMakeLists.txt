@@ -3,6 +3,7 @@ set(SOURCES
 	Base.cpp
 	Extensions.cpp
 	ExtBigReg.cpp
+	ExtGLX.cpp
 	ExtRANDR.cpp
 	Font.cpp
 	Image.cpp

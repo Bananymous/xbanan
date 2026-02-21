@@ -194,3 +194,5 @@ extern ATOM g_atom_value;
 
 extern int g_epoll_fd;
 extern BAN::HashMap<int, EpollThingy> g_epoll_thingies;
+
+extern int g_server_grabber_fd;

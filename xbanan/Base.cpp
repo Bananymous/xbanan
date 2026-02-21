@@ -2297,12 +2297,48 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		}
 		case X_GrabServer:
 		{
-			dwarnln("GrabServer");
+			g_server_grabber_fd = client_info.fd;
+
+			for (const auto& [_, thingy] : g_epoll_thingies)
+			{
+				if (thingy.type != EpollThingy::Type::Client)
+					continue;
+
+				auto& other_client = thingy.value.get<Client>();
+				if (client_info.fd == other_client.fd)
+					continue;
+
+				uint32_t events = 0;
+				if (other_client.has_epollout)
+					events |= EPOLLOUT;
+
+				epoll_event event { .events = events, .data = { .fd = other_client.fd } };
+				epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
+			}
+
 			break;
 		}
 		case X_UngrabServer:
 		{
-			dwarnln("UngrabServer");
+			g_server_grabber_fd = -1;
+
+			for (const auto& [_, thingy] : g_epoll_thingies)
+			{
+				if (thingy.type != EpollThingy::Type::Client)
+					continue;
+
+				auto& other_client = thingy.value.get<Client>();
+				if (client_info.fd == other_client.fd)
+					continue;
+
+				uint32_t events = EPOLLIN;
+				if (other_client.has_epollout)
+					events |= EPOLLOUT;
+
+				epoll_event event { .events = events, .data = { .fd = other_client.fd } };
+				epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
+			}
+
 			break;
 		}
 		case X_QueryPointer:

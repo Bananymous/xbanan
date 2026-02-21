@@ -106,6 +106,8 @@ ATOM g_atom_value = XA_LAST_PREDEFINED + 1;
 int g_epoll_fd;
 BAN::HashMap<int, EpollThingy> g_epoll_thingies;
 
+int g_server_grabber_fd = -1;
+
 int main()
 {
 	for (int sig = 1; sig < NSIG; sig++)
@@ -292,6 +294,26 @@ int main()
 			epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
 			close(client_fd);
 			g_epoll_thingies.remove(client_fd);
+
+			if (client_fd == g_server_grabber_fd)
+			{
+				g_server_grabber_fd = -1;
+
+				for (const auto& [_, thingy] : g_epoll_thingies)
+				{
+					if (thingy.type != EpollThingy::Type::Client)
+						continue;
+
+					auto& other_client = thingy.value.get<Client>();
+
+					uint32_t events = EPOLLIN;
+					if (other_client.has_epollout)
+						events |= EPOLLOUT;
+
+					epoll_event event { .events = events, .data = { .fd = other_client.fd } };
+					epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
+				}
+			}
 		};
 
 	MUST(g_objects.insert(g_root.windowId,
@@ -335,7 +357,11 @@ int main()
 					}
 				}));
 
-				epoll_event event = { .events = EPOLLIN, .data = { .fd = client_sock } };
+				uint32_t events = 0;
+				if (g_server_grabber_fd == -1)
+					events |= EPOLLIN;
+
+				epoll_event event = { .events = events, .data = { .fd = client_sock } };
 				if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, client_sock, &event) == -1)
 				{
 					perror("xbanan: epoll_ctl");
@@ -398,7 +424,11 @@ int main()
 
 				if (client_info.output_buffer.empty())
 				{
-					epoll_event event { .events = EPOLLIN, .data = { .fd = client_info.fd } };
+					uint32_t events = 0;
+					if (g_server_grabber_fd == -1 || g_server_grabber_fd == client_info.fd)
+						events |= EPOLLIN;
+
+					epoll_event event { .events = events, .data = { .fd = client_info.fd } };
 					if (epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
 					{
 						perror("xbanan: epoll_ctl");
@@ -414,6 +444,9 @@ int main()
 			}
 
 			if (!(events[i].events & EPOLLIN))
+				continue;
+
+			if (g_server_grabber_fd != -1 && g_server_grabber_fd != client_info.fd)
 				continue;
 
 			switch (client_info.state)
@@ -533,7 +566,11 @@ int main()
 			if (client_info.output_buffer.empty() || client_info.has_epollout)
 				continue;
 
-			epoll_event event { .events = EPOLLIN | EPOLLOUT, .data = { .fd = client_info.fd } };
+			uint32_t events = EPOLLOUT;
+			if (g_server_grabber_fd == -1 || g_server_grabber_fd == client_info.fd)
+				events |= EPOLLIN;
+
+			epoll_event event { .events = events, .data = { .fd = client_info.fd } };
 			if (epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
 			{
 				perror("xbanan: epoll_ctl");

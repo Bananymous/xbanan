@@ -1,5 +1,6 @@
 #include "Definitions.h"
 #include "Extensions.h"
+#include "Font.h"
 #include "Image.h"
 #include "Keymap.h"
 #include "Utils.h"
@@ -2375,26 +2376,17 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			break;
 		}
 		case X_OpenFont:
-		{
-			auto request = decode<xOpenFontReq>(packet).value();
-
-			auto name = BAN::StringView((char*)packet.data(), request.nbytes);
-			dwarnln("OpenFont");
-			dwarnln("  fid:  {}", request.fid);
-			dwarnln("  name: {}", name);
-
-			xError error {
-				.type = X_Error,
-				.errorCode = BadName,
-				.sequenceNumber = client_info.sequence,
-				.resourceID = 0,
-				.minorCode = 0,
-				.majorCode = opcode,
-			};
-			TRY(encode(client_info.output_buffer, error));
-
+			TRY(open_font(client_info, packet));
 			break;
-		}
+		case X_CloseFont:
+			TRY(close_font(client_info, packet));
+			break;
+		case X_QueryFont:
+			TRY(query_font(client_info, packet));
+			break;
+		case X_ListFonts:
+			TRY(list_fonts(client_info, packet));
+			break;
 		case X_GetInputFocus:
 		{
 			dprintln("GetInputFocus");
@@ -2473,6 +2465,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			uint32_t foreground = 0x000000;
 			uint32_t background = 0x000000;
+			uint32_t font = None;
 			uint32_t clip_mask = 0;
 			int32_t clip_origin_x = 0;
 			int32_t clip_origin_y = 0;
@@ -2491,6 +2484,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 3:
 						dprintln("    background: {8h}", value);
 						background = value;
+						break;
+					case 14:
+						dprintln("    font: {}", value);
+						font = value;
 						break;
 					case 17:
 						dprintln("    clip-origin-x: {}", value);
@@ -2516,6 +2513,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.object = Object::GraphicsContext { 
 					.foreground = foreground,
 					.background = background,
+					.font = font,
 					.clip_mask = clip_mask,
 					.clip_origin_x = clip_origin_x,
 					.clip_origin_y = clip_origin_y,
@@ -2554,6 +2552,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 3:
 						dprintln("    background: {8h}", value);
 						gc.background = value;
+						break;
+					case 14:
+						dprintln("    font: {}", value);
+						gc.font = value;
 						break;
 					case 17:
 						dprintln("    clip-origin-x: {}", value);
@@ -2988,6 +2990,18 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_PolyText8:
+			TRY(poly_text(client_info, packet, false));
+			break;
+		case X_PolyText16:
+			TRY(poly_text(client_info, packet, true));
+			break;
+		case X_ImageText8:
+			TRY(image_text(client_info, packet, false));
+			break;
+		case X_ImageText16:
+			TRY(image_text(client_info, packet, true));
+			break;
 		case X_CreateColormap:
 		{
 			auto request = decode<xCreateColormapReq>(packet).value();
@@ -3166,6 +3180,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_CreateGlyphCursor:
+			TRY(create_glyph_cursor(client_info, packet));
+			break;
 		case X_FreeCursor:
 		{
 			const auto cid = packet.as_span<const uint32_t>()[1];

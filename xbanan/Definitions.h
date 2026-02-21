@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Font.h"
+
 #include <BAN/Vector.h>
 #include <BAN/UniqPtr.h>
 #include <BAN/HashMap.h>
@@ -41,6 +43,7 @@ struct Object
 		Window,
 		Pixmap,
 		GraphicsContext,
+		Font,
 		Extension,
 	};
 
@@ -109,6 +112,8 @@ struct Object
 		uint32_t foreground;
 		uint32_t background;
 
+		uint32_t font;
+
 		uint32_t clip_mask;
 		int32_t clip_origin_x;
 		int32_t clip_origin_y;
@@ -142,7 +147,7 @@ struct Object
 		void (*destructor)(Extension&);
 	};
 
-	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext, Extension> object;
+	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext, BAN::RefPtr<PCFFont>, Extension> object;
 };
 
 struct Client

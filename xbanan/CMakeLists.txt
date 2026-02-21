@@ -4,6 +4,7 @@ set(SOURCES
 	Extensions.cpp
 	ExtBigReg.cpp
 	ExtRANDR.cpp
+	Font.cpp
 	Image.cpp
 	Keymap.cpp
 )
@@ -19,6 +20,7 @@ endif()
 add_executable(xbanan ${SOURCES})
 banan_link_library(xbanan ban)
 banan_link_library(xbanan libgui)
+banan_link_library(xbanan libdeflate)
 
 target_compile_options(xbanan PRIVATE -Wall -Wextra -Wno-sign-compare -Wno-missing-field-initializers)
 

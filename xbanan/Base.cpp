@@ -1135,6 +1135,107 @@ static void on_key_event(Client& client_info, WINDOW wid, LibGUI::EventPacket::K
 	);
 }
 
+static void on_window_fullscreen_event(Client& client_info, WINDOW wid, bool is_fullscreen)
+{
+	static CARD32 _NET_WM_STATE            = g_atoms_name_to_id["_NET_WM_STATE"_sv];
+	static CARD32 _NET_WM_STATE_FULLSCREEN = g_atoms_name_to_id["_NET_WM_STATE_FULLSCREEN"_sv];
+
+	auto window_it = g_objects.find(wid);
+	if (window_it == g_objects.end() || window_it->value->type != Object::Type::Window)
+		return;
+
+	auto& window = window_it->value->object.get<Object::Window>();
+
+	window.fullscreen = is_fullscreen;
+
+	auto it = window.properties.find(_NET_WM_STATE);
+	if (it == window.properties.end())
+		it = MUST(window.properties.emplace(_NET_WM_STATE));
+
+	auto& _net_wm_state = it->value;
+	if (_net_wm_state.type != XA_ATOM || _net_wm_state.format != 32)
+		_net_wm_state = {};
+
+	_net_wm_state.type = XA_ATOM;
+	_net_wm_state.format = 32;
+
+	for (size_t i = 0; i + 4 <= _net_wm_state.data.size(); i += 4)
+	{
+		const auto atom = *reinterpret_cast<const CARD32*>(_net_wm_state.data.data() + i);
+		if (atom != _NET_WM_STATE_FULLSCREEN)
+			continue;
+		_net_wm_state.data.remove(i);
+		_net_wm_state.data.remove(i);
+		_net_wm_state.data.remove(i);
+		_net_wm_state.data.remove(i);
+		i -= 4;
+	}
+
+	if (is_fullscreen)
+	{
+		const size_t atom_count = _net_wm_state.data.size() / 4;
+		MUST(_net_wm_state.data.resize(_net_wm_state.data.size() + 4));
+		reinterpret_cast<CARD32*>(_net_wm_state.data.data())[atom_count] = _NET_WM_STATE_FULLSCREEN;
+	}
+
+	if (window.event_mask & PropertyChangeMask)
+	{
+		xEvent event = { .u = {
+			.property = {
+				.window = wid,
+				.atom = _NET_WM_STATE,
+				.time = static_cast<CARD32>(time(nullptr)),
+				.state = PropertyNewValue,
+			}
+		}};
+		event.u.u.type = PropertyNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, event));
+
+		dwarnln("sent fullscreen {} to {}", is_fullscreen, wid);
+	}
+	else
+	{
+		dwarnln("did not send fullscreen {} to {}", is_fullscreen, wid);
+	}
+}
+
+static void on_root_client_message(const xEvent& event)
+{
+	static CARD32 _NET_WM_STATE            = g_atoms_name_to_id["_NET_WM_STATE"_sv];
+	static CARD32 _NET_WM_STATE_FULLSCREEN = g_atoms_name_to_id["_NET_WM_STATE_FULLSCREEN"_sv];
+
+	ASSERT(event.u.u.type == ClientMessage);
+
+	const auto type   = event.u.clientMessage.u.l.type;
+	const auto action = event.u.clientMessage.u.l.longs0;
+	const auto field  = event.u.clientMessage.u.l.longs1;
+	if (type != _NET_WM_STATE || field != _NET_WM_STATE_FULLSCREEN)
+		return;
+
+	auto window_it = g_objects.find(event.u.clientMessage.window);
+	if (window_it == g_objects.end() || window_it->value->type != Object::Type::Window)
+		return;
+
+	auto& window = window_it->value->object.get<Object::Window>();
+	if (!window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+		return;
+
+	auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+	switch (action)
+	{
+		case 0:
+			gui_window->set_fullscreen(false);
+			break;
+		case 1:
+			gui_window->set_fullscreen(true);
+			break;
+		case 2:
+			gui_window->set_fullscreen(!window.fullscreen);
+			break;
+	}
+}
+
 BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 {
 	const uint8_t opcode = packet[0];
@@ -1300,6 +1401,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				});
 				gui_window_ptr->set_window_focus_event_callback([&client_info, wid](auto event) {
 					on_window_focus_event(client_info, wid, event.focused);
+				});
+				gui_window_ptr->set_window_fullscreen_event_callback([&client_info, wid](auto event) {
+					on_window_fullscreen_event(client_info, wid, event.fullscreen);
 				});
 				gui_window_ptr->set_mouse_move_event_callback([&client_info, wid](auto event) {
 					on_mouse_move_event(client_info, wid, event.x, event.y);
@@ -2188,9 +2292,34 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  destination: {}", request.destination);
 			dprintln("  eventMask:   {}", request.eventMask);
 
-			auto event = request.event;
-			event.u.u.sequenceNumber = client_info.sequence;
-			TRY(encode(client_info.output_buffer, event));
+			WINDOW wid = request.destination;
+			if (wid == PointerWindow || wid == InputFocus)
+				wid = s_focus_window;
+
+			(void)TRY_REF(get_window(client_info, wid, X_SendEvent));
+
+			Client* target_client = nullptr;
+			for (auto& [_, thingy] : g_epoll_thingies)
+			{
+				if (thingy.type != EpollThingy::Type::Client)
+					continue;
+				auto& other_client = thingy.value.get<Client>();
+				if (!other_client.objects.contains(wid))
+					continue;
+				target_client = &other_client;
+				break;
+			}
+
+			// FIXME: propagate, event masks
+
+			if (target_client)
+			{
+				request.event.u.u.sequenceNumber = target_client->sequence;
+				TRY(encode(target_client->output_buffer, request.event));
+			}
+
+			if (request.destination == g_root.windowId && request.event.u.u.type == ClientMessage)
+				on_root_client_message(request.event);
 
 			break;
 		}

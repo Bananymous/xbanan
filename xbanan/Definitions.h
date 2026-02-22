@@ -62,6 +62,7 @@ struct Object
 	{
 		bool mapped { false };
 		bool focused { false };
+		bool fullscreen { false };
 		uint8_t depth { 0 };
 		int32_t x { 0 };
 		int32_t y { 0 };

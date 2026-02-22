@@ -277,6 +277,16 @@ int main()
 
 			dprintln("client {} disconnected", client_fd);
 
+			// FIXME: store selected events on client so we dont
+			//        have to loop over all objects
+			for (auto& [_, object] : g_objects)
+			{
+				if (object->type != Object::Type::Window)
+					continue;
+				auto& window = object->object.get<Object::Window>();
+				window.event_masks.remove(&client_info);
+			}
+
 			for (auto id : client_info.objects)
 			{
 				auto it = g_objects.find(id);
@@ -332,7 +342,8 @@ int main()
 		MUST(BAN::UniqPtr<Object>::create(Object {
 			.type = Object::Type::Window,
 			.object = Object::Window {
-				.event_mask = 0,
+				.mapped = true,
+				.parent = None,
 				.c_class = InputOutput,
 				.window = {},
 			}

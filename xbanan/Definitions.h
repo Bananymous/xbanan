@@ -68,7 +68,6 @@ struct Object
 		int32_t y { 0 };
 		int32_t cursor_x { -1 };
 		int32_t cursor_y { -1 };
-		uint32_t event_mask { 0 };
 		WINDOW parent;
 		CURSOR cursor;
 		CARD16 c_class;
@@ -77,6 +76,8 @@ struct Object
 			BAN::UniqPtr<LibGUI::Window>,
 			LibGUI::Texture
 		> window;
+
+		BAN::HashMap<Client*, uint32_t> event_masks;
 
 		BAN::HashMap<ATOM, Property> properties;
 
@@ -97,6 +98,9 @@ struct Object
 				return window.get<BAN::UniqPtr<LibGUI::Window>>()->texture();
 			ASSERT_NOT_REACHED();
 		}
+
+		uint32_t full_event_mask() const;
+		BAN::ErrorOr<void> send_event(xEvent event, uint32_t event_mask);
 	};
 
 	struct Pixmap

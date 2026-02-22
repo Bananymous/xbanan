@@ -253,6 +253,15 @@ int main()
 	APPEND_ATOM(XA_WM_TRANSIENT_FOR);
 #undef APPEND_ATOM
 
+#define APPEND_ATOM_CUSTOM(name) do { \
+			const CARD32 atom = g_atom_value++; \
+			MUST(g_atoms_id_to_name.insert(atom, #name##_sv)); \
+			MUST(g_atoms_name_to_id.insert(#name##_sv, atom)); \
+		} while (0)
+	APPEND_ATOM_CUSTOM(WM_PROTOCOLS);
+	APPEND_ATOM_CUSTOM(WM_DELETE_WINDOW);
+#undef APPEND_ATOM_CUSTOM
+
 	MUST(initialize_keymap());
 
 	printf("xbanan started\n");

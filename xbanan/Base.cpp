@@ -823,22 +823,8 @@ static void send_exposure_recursive(Client& client_info, WINDOW wid)
 
 static void on_window_close_event(Client& client_info, WINDOW wid)
 {
-	static CARD32 WM_PROTOCOLS = None;
-	static CARD32 WM_DELETE_WINDOW = None;
-
-	if (WM_PROTOCOLS == None)
-	{
-		auto it = g_atoms_name_to_id.find("WM_PROTOCOLS"_sv);
-		if (it != g_atoms_name_to_id.end())
-			WM_PROTOCOLS = it->value;
-	}
-
-	if (WM_DELETE_WINDOW == None)
-	{
-		auto it = g_atoms_name_to_id.find("WM_DELETE_WINDOW"_sv);
-		if (it != g_atoms_name_to_id.end())
-			WM_DELETE_WINDOW = it->value;
-	}
+	static CARD32 WM_PROTOCOLS     = g_atoms_name_to_id["WM_PROTOCOLS"_sv];
+	static CARD32 WM_DELETE_WINDOW = g_atoms_name_to_id["WM_DELETE_WINDOW"_sv];
 
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
@@ -847,9 +833,6 @@ static void on_window_close_event(Client& client_info, WINDOW wid)
 	const bool supports_wm_delete_winow =
 		[&window]
 		{
-			if (WM_PROTOCOLS == None || WM_DELETE_WINDOW == None)
-				return false;
-
 			auto wm_protocols_it = window.properties.find(WM_PROTOCOLS);
 			if (wm_protocols_it == window.properties.end())
 				return false;

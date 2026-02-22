@@ -7,7 +7,6 @@
 #include <LibInput/KeyEvent.h>
 #include <LibInput/MouseEvent.h>
 
-#include <cstdint>
 #include <sys/socket.h>
 
 #define FOR_EACH_0(macro)

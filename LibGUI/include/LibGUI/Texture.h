@@ -2,7 +2,6 @@
 
 #include <BAN/StringView.h>
 
-#include <cstdint>
 #include <stdint.h>
 
 namespace LibFont { class Font; }

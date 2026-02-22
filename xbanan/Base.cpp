@@ -8,6 +8,7 @@
 #include "Utils.h"
 
 #include <X11/X.h>
+#include <X11/Xatom.h>
 
 #include <time.h>
 #include <sys/epoll.h>
@@ -820,6 +821,72 @@ static void send_exposure_recursive(Client& client_info, WINDOW wid)
 	}
 }
 
+static void on_window_close_event(Client& client_info, WINDOW wid)
+{
+	static CARD32 WM_PROTOCOLS = None;
+	static CARD32 WM_DELETE_WINDOW = None;
+
+	if (WM_PROTOCOLS == None)
+	{
+		auto it = g_atoms_name_to_id.find("WM_PROTOCOLS"_sv);
+		if (it != g_atoms_name_to_id.end())
+			WM_PROTOCOLS = it->value;
+	}
+
+	if (WM_DELETE_WINDOW == None)
+	{
+		auto it = g_atoms_name_to_id.find("WM_DELETE_WINDOW"_sv);
+		if (it != g_atoms_name_to_id.end())
+			WM_DELETE_WINDOW = it->value;
+	}
+
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+	auto& window = object.object.get<Object::Window>();
+
+	const bool supports_wm_delete_winow =
+		[&window]
+		{
+			if (WM_PROTOCOLS == None || WM_DELETE_WINDOW == None)
+				return false;
+			
+			auto wm_protocols_it = window.properties.find(WM_PROTOCOLS);
+			if (wm_protocols_it == window.properties.end())
+				return false;
+			
+			const auto& wm_protocols = wm_protocols_it->value;
+			if (wm_protocols.type != XA_ATOM || wm_protocols.format != 32)
+				return false;
+
+			const auto atoms = BAN::ConstByteSpan(wm_protocols.data.span()).as_span<const CARD32>();
+			for (auto atom : atoms)
+				if (atom == WM_DELETE_WINDOW)
+					return true;
+
+			return false;
+		}();
+
+	if (!supports_wm_delete_winow)
+		MUST(destroy_window(client_info, wid));
+	else
+	{
+		xEvent event { .u = {
+			.clientMessage = {
+				.window = wid,
+				.u = { .l = {
+					.type = WM_PROTOCOLS,
+					.longs0 = static_cast<INT32>(WM_DELETE_WINDOW),
+					.longs1 = static_cast<INT32>(time(nullptr)),
+				}}
+			}
+		}};
+		event.u.u.type = ClientMessage;
+		event.u.u.detail = 32;
+		event.u.u.sequenceNumber = client_info.sequence;
+		MUST(encode(client_info.output_buffer, event));
+	}
+}
+
 static void on_window_resize_event(Client& client_info, WINDOW wid)
 {
 	auto& object = *g_objects[wid];
@@ -1242,7 +1309,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			if (gui_window_ptr)
 			{
 				const WINDOW wid = request.wid;
-				gui_window_ptr->set_close_window_event_callback([]{});
+				gui_window_ptr->set_close_window_event_callback([&client_info, wid] {
+					on_window_close_event(client_info, wid);
+				});
 				gui_window_ptr->set_resize_window_event_callback([&client_info, wid]() {
 					on_window_resize_event(client_info, wid);
 				});

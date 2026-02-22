@@ -144,7 +144,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 			delete &TRY_REF(get_glx_context(request.context));
 			client_info.objects.remove(request.context);
 			g_objects.remove(request.context);
-		
+
 			break;
 		}
 		case X_GLXIsDirect:
@@ -253,7 +253,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.n = static_cast<CARD16>(string.size()),
 			};
 			TRY(encode(client_info.output_buffer, reply));
-	
+
 			TRY(encode(client_info.output_buffer, string));
 			for (size_t i = 0; (string.size() + i) % 4; i++)
 				TRY(encode(client_info.output_buffer, '\0'));
@@ -289,7 +289,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.numAttribs = attribs,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-	
+
 			TRY(encode(client_info.output_buffer, g_fb_configs));
 
 			break;

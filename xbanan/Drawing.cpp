@@ -207,7 +207,7 @@ BAN::ErrorOr<void> fill_poly(Client& client_info, BAN::ConstByteSpan packet)
 	dprintln("  gc:        {}", request.gc);
 	dprintln("  shape:     {}", request.shape);
 	dprintln("  coordMode: {}", request.coordMode);
-	
+
 	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_FillPoly));
 
 	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_FillPoly));
@@ -268,7 +268,7 @@ BAN::ErrorOr<void> fill_poly(Client& client_info, BAN::ConstByteSpan packet)
 	}
 
 	if (g_objects[request.drawable]->type == Object::Type::Window)
-		invalidate_window(request.drawable, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);	
+		invalidate_window(request.drawable, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);
 
 	return {};
 }
@@ -347,7 +347,7 @@ BAN::ErrorOr<void> poly_fill_arc(Client& client_info, BAN::ConstByteSpan packet)
 
 		const int32_t min_x = BAN::Math::max<int32_t>(0, arc.x);
 		const int32_t min_y = BAN::Math::max<int32_t>(0, arc.y);
-		
+
 		const int32_t max_x = BAN::Math::min<int32_t>(out_w, arc.x + arc.width);
 		const int32_t max_y = BAN::Math::min<int32_t>(out_h, arc.y + arc.height);
 

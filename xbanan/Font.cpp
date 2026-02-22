@@ -455,7 +455,7 @@ static void initialize_fonts()
 
 			auto it = s_available_fonts.find(BAN::String(name));
 			if (it == s_available_fonts.end())
-				continue;	
+				continue;
 
 			MUST(s_available_fonts.insert(BAN::String(alias), it->value));
 		}
@@ -756,7 +756,7 @@ static void write_text(WriteTextInfo& info)
 	for (size_t i = 0; i < info.string_len; i++)
 	{
 		const uint16_t codepoint = info.wide ? (info.string[i * 2] << 8) | info.string[i * 2 + 1] : info.string[i];
-		
+
 		auto glyph_index = info.font->find_glyph(codepoint);
 		if (!glyph_index.has_value())
 			continue;

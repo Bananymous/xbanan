@@ -646,7 +646,7 @@ static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
 		const auto& window = object.object.get<Object::Window>();
 		if (!window_contains(window, x, y))
 			break;
-		
+
 		MUST(result.push_back(wid));
 
 		const WINDOW old_wid = wid;
@@ -849,11 +849,11 @@ static void on_window_close_event(Client& client_info, WINDOW wid)
 		{
 			if (WM_PROTOCOLS == None || WM_DELETE_WINDOW == None)
 				return false;
-			
+
 			auto wm_protocols_it = window.properties.find(WM_PROTOCOLS);
 			if (wm_protocols_it == window.properties.end())
 				return false;
-			
+
 			const auto& wm_protocols = wm_protocols_it->value;
 			if (wm_protocols.type != XA_ATOM || wm_protocols.format != 32)
 				return false;
@@ -1101,7 +1101,7 @@ static void on_mouse_button_event(Client& client_info, WINDOW wid, uint8_t xbutt
 		case Button5: mask = Button5Mask; break;
 	}
 
-	if (pressed)	
+	if (pressed)
 		s_butmask |= mask;
 	else
 		s_butmask &= ~mask;
@@ -1672,7 +1672,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			if (!window_changed)
 				break;
-		
+
 			invalidate_window(request.window, min_x, min_y, max_x - min_x, max_y + min_y);
 
 			if (window.event_mask & StructureNotifyMask)
@@ -1904,7 +1904,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.data = {},
 				}));
 			}
-			
+
 			auto& property = it->value;
 			ASSERT(property.format == request.format);
 
@@ -2028,7 +2028,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			else
 			{
 				const auto& property = it->value;
-	
+
 				const size_t offset = request.longOffset * 4;
 				const size_t bytes = BAN::Math::min<size_t>(request.longLength * 4, property.data.size() - offset);
 				ASSERT(bytes % (property.format / 8) == 0);
@@ -2538,7 +2538,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			TRY(client_info.objects.insert(request.gc));
 			TRY(g_objects.insert(request.gc, TRY(BAN::UniqPtr<Object>::create(Object {
 				.type = Object::Type::GraphicsContext,
-				.object = Object::GraphicsContext { 
+				.object = Object::GraphicsContext {
 					.foreground = foreground,
 					.background = background,
 					.line_width = line_width,
@@ -2956,7 +2956,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.nColors = static_cast<CARD16>(count),
 			};
 			TRY(encode(client_info.output_buffer, reply));
-			
+
 			dprintln("  colors:");
 			for (size_t i = 0; i < count; i++)
 			{
@@ -3003,7 +3003,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		case X_CreateCursor:
 		{
 			auto request = decode<xCreateCursorReq>(packet).value();
-			
+
 			dprintln("CreateCursor");
 			dprintln("  cid:       {}", request.cid);
 			dprintln("  source:    {}", request.source);
@@ -3071,7 +3071,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		case X_FreeCursor:
 		{
 			const auto cid = packet.as_span<const uint32_t>()[1];
-			
+
 			dprintln("FreeCursor");
 			dprintln("  cid:       {}", cid);
 

@@ -33,6 +33,12 @@ banan_link_library(xbanan libdeflate)
 banan_link_library(xbanan libgui)
 banan_link_library(xbanan libinput)
 
-target_compile_options(xbanan PRIVATE -Wall -Wextra -Wno-sign-compare -Wno-missing-field-initializers)
+target_compile_options(xbanan PRIVATE -Wall -Wextra)
+target_compile_options(xbanan PRIVATE
+	-Wno-sign-compare
+	-Wno-missing-field-initializers
+	-Wno-unused-variable
+	-Wno-unused-but-set-variable
+)
 
 install(TARGETS xbanan OPTIONAL)

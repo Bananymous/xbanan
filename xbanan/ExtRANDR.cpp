@@ -10,7 +10,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 {
 	static CARD32 crtc_id   = 5;
 	static CARD32 output_id = 6;
-	static CARD32 mode_id   = 7; 
+	static CARD32 mode_id   = 7;
 	static CARD32 timestamp = time(nullptr);
 
 	static xRenderTransform transform {

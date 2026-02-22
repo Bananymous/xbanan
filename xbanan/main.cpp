@@ -180,8 +180,8 @@ int main()
 	}
 
 #define APPEND_ATOM(name) do { \
-			MUST(g_atoms_id_to_name.insert(name, #name##_sv)); \
-			MUST(g_atoms_name_to_id.insert(#name##_sv, name)); \
+			MUST(g_atoms_id_to_name.insert(name, #name##_sv.substring(3))); \
+			MUST(g_atoms_name_to_id.insert(#name##_sv.substring(3), name)); \
 		} while (0)
 	APPEND_ATOM(XA_PRIMARY);
 	APPEND_ATOM(XA_SECONDARY);

@@ -1294,18 +1294,20 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				switch (i)
 				{
 					case 0:
+						dprintln("    background-pixmap: {8h}", value);
 						if (value == None || value == ParentRelative)
 							background = LibGUI::Texture::color_invisible;
-						else
-							dprintln("    {8h}: {8h}", 1 << i, value);
 						break;
 					case 1:
+						dprintln("    background-pixel: {8h}", value);
 						background = value;
 						break;
 					case 11:
+						dprintln("    event-mask: {8h}", value);
 						event_mask = value;
 						break;
 					case 14:
+						dprintln("    cursor: {8h}", value);
 						cursor_id = value;
 						break;
 					default:
@@ -1435,8 +1437,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xChangeWindowAttributesReq>(packet).value();
 
 			dprintln("ChangeWindowAttributes");
-			dprintln(" window:    {}", request.window);
-			dprintln(" valueMask: {8h}", request.valueMask);
+			dprintln("  window:    {}", request.window);
+			dprintln("  valueMask: {8h}", request.valueMask);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
@@ -1452,21 +1454,23 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				switch (i)
 				{
 					case 0:
+						dprintln("    background-pixmap: {8h}", value);
 						if (value == None || value == ParentRelative)
 							background = LibGUI::Texture::color_invisible;
-						else
-							dprintln("    {8h}: {8h}", 1 << i, value);
 						break;
 					case 1:
+						dprintln("    background-pixel: {8h}", value);
 						background = value;
 						break;
 					case 11:
+						dprintln("    event-mask: {8h}", value);
 						if (value != 0)
 							TRY(window.event_masks.emplace_or_assign(&client_info, value));
 						else
 							window.event_masks.remove(&client_info);
 						break;
 					case 14:
+						dprintln("    cursor: {8h}", value);
 						cursor_id = value;
 						break;
 					default:

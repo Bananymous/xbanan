@@ -941,7 +941,7 @@ static void on_window_focus_event(WINDOW wid, bool focused)
 	MUST(window.send_event(event, FocusChangeMask));
 }
 
-static void send_key_button_pointer_event(WINDOW root_wid, BYTE detail, uint32_t event_mask, BYTE event_type)
+static void send_key_button_pointer_event(WINDOW root_wid, BYTE detail, uint32_t event_mask, BYTE event_type, KeyButMask state)
 {
 	int32_t root_x, root_y;
 	int32_t event_x, event_y;
@@ -986,12 +986,12 @@ static void send_key_button_pointer_event(WINDOW root_wid, BYTE detail, uint32_t
 			.time = static_cast<CARD32>(time(nullptr)),
 			.root = g_root.windowId,
 			.event = wid,
-			.child = child_wid,
+			.child = static_cast<CARD32>(child_wid == wid ? None : child_wid),
 			.rootX = static_cast<INT16>(root_x),
 			.rootY = static_cast<INT16>(root_y),
 			.eventX = static_cast<INT16>(event_x),
 			.eventY = static_cast<INT16>(event_y),
-			.state = static_cast<KeyButMask>(s_keymask | s_butmask),
+			.state = state,
 			.sameScreen = xTrue,
 		}
 	}};
@@ -1057,7 +1057,7 @@ static void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
 	if (s_butmask & Button3Mask) event_mask |= Button3MotionMask;
 	if (s_butmask & Button4Mask) event_mask |= Button4MotionMask;
 	if (s_butmask & Button5Mask) event_mask |= Button5MotionMask;
-	send_key_button_pointer_event(wid, NotifyNormal, event_mask, MotionNotify);
+	send_key_button_pointer_event(wid, NotifyNormal, event_mask, MotionNotify, s_keymask | s_butmask);
 }
 
 static void on_mouse_button_event(WINDOW wid, uint8_t xbutton, bool pressed)
@@ -1072,6 +1072,8 @@ static void on_mouse_button_event(WINDOW wid, uint8_t xbutton, bool pressed)
 		case Button5: mask = Button5Mask; break;
 	}
 
+	const auto state = s_keymask | s_butmask;
+
 	if (pressed)
 		s_butmask |= mask;
 	else
@@ -1081,7 +1083,8 @@ static void on_mouse_button_event(WINDOW wid, uint8_t xbutton, bool pressed)
 		wid,
 		xbutton,
 		pressed ? ButtonPressMask : ButtonReleaseMask,
-		pressed ? ButtonPress     : ButtonRelease
+		pressed ? ButtonPress     : ButtonRelease,
+		state
 	);
 }
 
@@ -1103,6 +1106,8 @@ static void on_key_event(WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t even
 			s_pressed_keys[byte] &= ~(1 << bit);
 	}
 
+	const auto state = s_keymask | s_butmask;
+
 	s_keymask = 0;
 	if (event.shift())
 		s_keymask |= ShiftMask;
@@ -1117,7 +1122,8 @@ static void on_key_event(WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t even
 		wid,
 		xkeycode,
 		event.pressed() ? KeyPressMask : KeyReleaseMask,
-		event.pressed() ? KeyPress     : KeyRelease
+		event.pressed() ? KeyPress     : KeyRelease,
+		state
 	);
 }
 
@@ -1385,7 +1391,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				gui_window_ptr->set_mouse_move_event_callback([wid](auto event) {
 					on_mouse_move_event(wid, event.x, event.y);
 				});
-				gui_window_ptr->set_mouse_button_event_callback([&client_info, wid](auto event) {
+				gui_window_ptr->set_mouse_button_event_callback([wid](auto event) {
 					uint8_t xbutton = 0;
 					switch (event.button)
 					{

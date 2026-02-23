@@ -159,9 +159,9 @@ static constexpr uint32_t my_key_to_x_keysym(LibInput::Key key)
 		case Key::Half:
 			return XK_onehalf;
 		case Key::OpenParenthesis:
-			return ')';
-		case Key::CloseParenthesis:
 			return '(';
+		case Key::CloseParenthesis:
+			return ')';
 		case Key::OpenSquareBracket:
 			return '[';
 		case Key::CloseSquareBracket:

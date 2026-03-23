@@ -343,6 +343,7 @@ int main()
 			.type = Object::Type::Window,
 			.object = Object::Window {
 				.mapped = true,
+				.depth = g_root.rootDepth,
 				.parent = None,
 				.c_class = InputOutput,
 				.window = {},

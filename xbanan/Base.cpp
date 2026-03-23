@@ -1281,6 +1281,37 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  visual:  {}", request.visual);
 			dprintln("  mask:    {8h}", request.mask);
 
+			auto& parent_window = TRY_REF(get_window(client_info, request.parent, opcode));
+			if (request.c_class == CopyFromParent)
+				request.c_class = parent_window.c_class;
+
+			if (request.depth == 0 && request.c_class == InputOutput)
+				request.depth = parent_window.depth;
+
+			bool valid_depth = false;
+			switch (request.c_class)
+			{
+				case InputOutput:
+					valid_depth = (request.depth == g_depth.depth);
+					break;
+				case InputOnly:
+					valid_depth = (request.depth == 0);
+					break;
+			}
+
+			if (!valid_depth)
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = BadMatch,
+					.sequenceNumber = client_info.sequence,
+					.minorCode = 0,
+					.majorCode = opcode,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				return {};
+			}
+
 			uint32_t event_mask { 0 };
 			uint32_t background { 0x000000 };
 			CURSOR cursor_id = None;
@@ -1350,12 +1381,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				window = BAN::move(gui_window);
 			}
 
-			auto& parent_object = g_objects[request.parent];
-			ASSERT(parent_object->type == Object::Type::Window);
-
-			auto& parent_window = parent_object->object.get<Object::Window>();
-			TRY(parent_window.children.push_back(request.wid));
-
 			TRY(client_info.objects.insert(request.wid));
 			auto object_it = TRY(g_objects.insert(
 				request.wid,
@@ -1367,7 +1392,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						.y = request.y,
 						.parent = request.parent,
 						.cursor = cursor_id,
-						.c_class = request.c_class == CopyFromParent ? parent_window.c_class : request.c_class,
+						.c_class = request.c_class,
 						.window = BAN::move(window),
 					},
 				}))

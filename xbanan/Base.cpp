@@ -1400,6 +1400,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			if (event_mask != 0)
 				TRY(object_it->value->object.get<Object::Window>().event_masks.insert(&client_info, event_mask));
 
+			TRY(parent_window.children.push_back(request.wid));
+
 			if (gui_window_ptr)
 			{
 				const WINDOW wid = request.wid;

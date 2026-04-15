@@ -18,18 +18,19 @@
 #include <netinet/in.h>
 #endif
 
-static const xRectangle s_screen_bounds =
+static BAN::UniqPtr<LibGUI::Window> s_dummy_window =
 	[]() {
 		auto attributes = LibGUI::Window::default_attributes;
 		attributes.shown = false;
-		auto window = MUST(LibGUI::Window::create(0, 0, ""_sv, attributes));
-		return xRectangle {
-			.x = 0,
-			.y = 0,
-			.width = static_cast<CARD16>(window->width()),
-			.height = static_cast<CARD16>(window->height()),
-		};
+		return MUST(LibGUI::Window::create(0, 0, ""_sv, attributes));
 	}();
+
+static const xRectangle s_screen_bounds = {
+	.x = 0,
+	.y = 0,
+	.width = static_cast<CARD16>(s_dummy_window->width()),
+	.height = static_cast<CARD16>(s_dummy_window->height()),
+};
 
 const xPixmapFormat g_formats[6] {
 	{
@@ -172,11 +173,24 @@ int main()
 		return 1;
 	}
 
-	epoll_event event { .events = EPOLLIN, .data = { .ptr = nullptr } };
-	if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, server_sock, &event) == -1)
 	{
-		perror("xbanan: epoll_ctl");
-		return 1;
+		epoll_event event { .events = EPOLLIN, .data = { .ptr = nullptr } };
+		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, server_sock, &event) == -1)
+		{
+			perror("xbanan: epoll_ctl");
+			return 1;
+		}
+	}
+
+	{
+		epoll_event event { .events = EPOLLIN, .data = { .ptr = (void*)1 } };
+		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, s_dummy_window->server_fd(), &event) == -1)
+		{
+			perror("xbanan: epoll_ctl");
+			return 1;
+		}
+
+		s_dummy_window->request_resize(1, 1);
 	}
 
 #define APPEND_ATOM(name) do { \
@@ -394,6 +408,12 @@ int main()
 				}
 
 				dprintln("client {} connected", client_sock);
+				continue;
+			}
+
+			if (events[i].data.ptr == (void*)1)
+			{
+				s_dummy_window->poll_events();
 				continue;
 			}
 

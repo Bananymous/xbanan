@@ -7,6 +7,7 @@
 
 #include <signal.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 

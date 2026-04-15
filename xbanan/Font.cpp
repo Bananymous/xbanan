@@ -129,8 +129,8 @@ static BAN::ErrorOr<BAN::Vector<uint8_t>> gzip_decompress_file(const BAN::String
 	BAN::ScopeGuard _2([&st, addr] { munmap(addr, st.st_size); });
 
 	auto file_data = BAN::ConstByteSpan(static_cast<const uint8_t*>(addr), st.st_size);
-	LibDEFLATE::Decompressor decompressor(file_data, LibDEFLATE::StreamType::GZip);
-	return TRY(decompressor.decompress());
+	LibDEFLATE::Decompressor decompressor(LibDEFLATE::StreamType::GZip);
+	return TRY(decompressor.decompress(file_data));
 }
 
 static constexpr uint64_t reverse_bits(uint64_t value, uint8_t count)

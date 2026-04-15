@@ -1,0 +1,810 @@
+From c9dd87198ce5262e6ddf6bf3b0c18eb84784d35e Mon Sep 17 00:00:00 2001
+From: Oskari Alaranta <oskari.alaranta@bananymous.com>
+Date: Wed, 15 Apr 2026 17:52:54 +0300
+Subject: [PATCH] linux-window-server-sdl2
+
+---
+ userspace/libraries/LibGUI/Widget/Widget.cpp  |   2 +-
+ userspace/libraries/LibGUI/Window.cpp         |   9 +-
+ userspace/programs/ProgramLauncher/main.cpp   |   2 +-
+ userspace/programs/Terminal/Terminal.cpp      |   4 +-
+ .../programs/WindowServer/CMakeLists.txt      |   3 +
+ .../programs/WindowServer/Framebuffer.cpp     |  52 +--
+ userspace/programs/WindowServer/Window.cpp    |  29 +-
+ .../programs/WindowServer/WindowServer.cpp    |  47 ++-
+ .../programs/WindowServer/WindowServer.h      |   1 +
+ userspace/programs/WindowServer/main.cpp      | 357 ++++++++++++------
+ 10 files changed, 340 insertions(+), 166 deletions(-)
+
+diff --git a/userspace/libraries/LibGUI/Widget/Widget.cpp b/userspace/libraries/LibGUI/Widget/Widget.cpp
+index d6489d87..c532fb04 100644
+--- a/userspace/libraries/LibGUI/Widget/Widget.cpp
++++ b/userspace/libraries/LibGUI/Widget/Widget.cpp
+@@ -15,7 +15,7 @@ namespace LibGUI::Widget
+ 	const LibFont::Font& Widget::default_font()
+ 	{
+ 		if (!s_default_font.has_value())
+-			MUST(set_default_font("/usr/share/fonts/lat0-16.psfu"_sv));
++			MUST(set_default_font("./lat0-16.psfu"_sv));
+ 		return s_default_font.value();
+ 	}
+ 
+diff --git a/userspace/libraries/LibGUI/Window.cpp b/userspace/libraries/LibGUI/Window.cpp
+index b4172f70..3a0e9cca 100644
+--- a/userspace/libraries/LibGUI/Window.cpp
++++ b/userspace/libraries/LibGUI/Window.cpp
+@@ -4,9 +4,8 @@
+ 
+ #include <fcntl.h>
+ #include <stdlib.h>
+-#include <sys/banan-os.h>
+ #include <sys/epoll.h>
+-#include <sys/mman.h>
++#include <sys/shm.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ #include <time.h>
+@@ -271,7 +270,7 @@ namespace LibGUI
+ 
+ 	void Window::cleanup()
+ 	{
+-		munmap(m_framebuffer_smo, m_width * m_height * 4);
++		shmdt(m_framebuffer_smo);
+ 		close(m_server_fd);
+ 		close(m_epoll_fd);
+ 	}
+@@ -279,7 +278,7 @@ namespace LibGUI
+ 	BAN::ErrorOr<void> Window::handle_resize_event(const EventPacket::ResizeWindowEvent& event)
+ 	{
+ 		if (m_framebuffer_smo)
+-			munmap(m_framebuffer_smo, m_width * m_height * 4);
++			shmdt(m_framebuffer_smo);
+ 		m_framebuffer_smo = nullptr;
+ 
+ 		TRY(m_texture.resize(event.width, event.height));
+@@ -287,7 +286,7 @@ namespace LibGUI
+ 		if (m_root_widget)
+ 			TRY(m_root_widget->set_fixed_geometry({ 0, 0, event.width, event.height }));
+ 
+-		void* framebuffer_addr = smo_map(event.smo_key);
++		void* framebuffer_addr = shmat(event.smo_key, nullptr, 0);
+ 		if (framebuffer_addr == nullptr)
+ 			return BAN::Error::from_errno(errno);
+ 
+diff --git a/userspace/programs/ProgramLauncher/main.cpp b/userspace/programs/ProgramLauncher/main.cpp
+index c833c582..0e1cc460 100644
+--- a/userspace/programs/ProgramLauncher/main.cpp
++++ b/userspace/programs/ProgramLauncher/main.cpp
+@@ -182,7 +182,7 @@ int main()
+ 	attributes.alpha_channel = true;
+ 	attributes.title_bar = false;
+ 
+-	auto font = MUST(LibFont::Font::load("/usr/share/fonts/lat0-16.psfu"_sv));
++	auto font = MUST(LibFont::Font::load("./lat0-16.psfu"_sv));
+ 
+ 	const auto full_program_list = get_program_list();
+ 
+diff --git a/userspace/programs/Terminal/Terminal.cpp b/userspace/programs/Terminal/Terminal.cpp
+index e1bd317d..8a6b5bd0 100644
+--- a/userspace/programs/Terminal/Terminal.cpp
++++ b/userspace/programs/Terminal/Terminal.cpp
+@@ -92,7 +92,7 @@ void Terminal::start_shell()
+ 		close(pts_slave);
+ 		close(pts_master);
+ 
+-		execl("/bin/Shell", "Shell", NULL);
++		execl("/usr/bin/zsh", "zsh", NULL);
+ 		exit(1);
+ 	}
+ 
+@@ -127,7 +127,7 @@ void Terminal::run()
+ 	m_window->texture().set_bg_color(m_bg_color);
+ 	m_window->invalidate();
+ 
+-	m_font = MUST(LibFont::Font::load("/usr/share/fonts/lat0-16.psfu"_sv));
++	m_font = MUST(LibFont::Font::load("./lat0-16.psfu"_sv));
+ 
+ 	m_window->set_min_size(m_font.width() * 8, m_font.height() * 2);
+ 
+diff --git a/userspace/programs/WindowServer/CMakeLists.txt b/userspace/programs/WindowServer/CMakeLists.txt
+index 8fdf79f9..fcaf441d 100644
+--- a/userspace/programs/WindowServer/CMakeLists.txt
++++ b/userspace/programs/WindowServer/CMakeLists.txt
+@@ -13,4 +13,7 @@ banan_link_library(WindowServer libfont)
+ banan_link_library(WindowServer libimage)
+ banan_link_library(WindowServer libinput)
+ 
++find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
++target_link_libraries(WindowServer PRIVATE SDL2::SDL2)
++
+ install(TARGETS WindowServer OPTIONAL)
+diff --git a/userspace/programs/WindowServer/Framebuffer.cpp b/userspace/programs/WindowServer/Framebuffer.cpp
+index 0e727e8f..119f1451 100644
+--- a/userspace/programs/WindowServer/Framebuffer.cpp
++++ b/userspace/programs/WindowServer/Framebuffer.cpp
+@@ -1,45 +1,53 @@
+ #include "Framebuffer.h"
+ 
+-#include <fcntl.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+ #include <string.h>
+-#include <sys/framebuffer.h>
+-#include <sys/mman.h>
++
++#include <SDL2/SDL.h>
++
++static constexpr size_t window_width { 1280 };
++static constexpr size_t window_height { 800 };
++static constexpr size_t window_bpp { 32 };
++
++SDL_Renderer* g_renderer { nullptr };
++SDL_Texture* g_texture { nullptr };
++SDL_Window* g_window { nullptr };
+ 
+ Framebuffer open_framebuffer()
+ {
+-	int framebuffer_fd = open("/dev/fb0", O_RDWR | O_CLOEXEC);
+-	if (framebuffer_fd == -1)
++	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == -1)
+ 	{
+-		perror("open");
++		fprintf(stderr, "Could not initialize SDL: %s\n", SDL_GetError());
+ 		exit(1);
+ 	}
+ 
+-	framebuffer_info_t framebuffer_info;
+-	if (pread(framebuffer_fd, &framebuffer_info, sizeof(framebuffer_info), -1) == -1)
++	g_window = SDL_CreateWindow("banan gui", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, window_width, window_height, SDL_WINDOW_SHOWN);
++	if (g_window == nullptr)
+ 	{
+-		perror("pread");
++		fprintf(stderr, "Could not create SDL window: %s\n", SDL_GetError());
+ 		exit(1);
+ 	}
+ 
+-	const size_t framebuffer_bytes = framebuffer_info.width * framebuffer_info.height * (BANAN_FB_BPP / 8);
++	g_renderer = SDL_CreateRenderer(g_window, -1, SDL_RENDERER_ACCELERATED);
++	if (g_renderer == nullptr)
++	{
++		fprintf(stderr, "Could not get SDL renderer: %s\n", SDL_GetError());
++		exit(1);
++	}
+ 
+-	uint32_t* framebuffer_mmap = (uint32_t*)mmap(NULL, framebuffer_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, framebuffer_fd, 0);
+-	if (framebuffer_mmap == MAP_FAILED)
++	g_texture = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, window_width, window_height);
++	if (g_texture == nullptr)
+ 	{
+-		perror("mmap");
++		fprintf(stderr, "Could not get SDL texture: %s\n", SDL_GetError());
+ 		exit(1);
+ 	}
+ 
+-	memset(framebuffer_mmap, 0, framebuffer_bytes);
+-	msync(framebuffer_mmap, framebuffer_bytes, MS_SYNC);
++	uint32_t* pixels = new uint32_t[window_width * window_height];
++	memset(pixels, 0, window_width * window_height * 4);
+ 
+ 	Framebuffer framebuffer;
+-	framebuffer.fd = framebuffer_fd;
+-	framebuffer.mmap = framebuffer_mmap;
+-	framebuffer.width = framebuffer_info.width;
+-	framebuffer.height = framebuffer_info.height;
+-	framebuffer.bpp = BANAN_FB_BPP;
++	framebuffer.mmap = pixels;
++	framebuffer.width = window_width;
++	framebuffer.height = window_height;
++	framebuffer.bpp = window_bpp;
+ 	return framebuffer;
+ }
+diff --git a/userspace/programs/WindowServer/Window.cpp b/userspace/programs/WindowServer/Window.cpp
+index 1e66f522..9759eec9 100644
+--- a/userspace/programs/WindowServer/Window.cpp
++++ b/userspace/programs/WindowServer/Window.cpp
+@@ -5,15 +5,14 @@
+ 
+ #include <LibGUI/Window.h>
+ 
+-#include <sys/banan-os.h>
+-#include <sys/mman.h>
++#include <sys/shm.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
+ 
+ Window::~Window()
+ {
+-	munmap(m_fb_addr, client_width() * client_height() * 4);
+-	smo_delete(m_smo_key);
++	shmdt(m_fb_addr);
++	shmctl(m_smo_key, IPC_RMID, nullptr);
+ 
+ 	LibGUI::EventPacket::DestroyWindowEvent packet;
+ 
+@@ -47,16 +46,16 @@ BAN::ErrorOr<void> Window::resize(uint32_t width, uint32_t height)
+ {
+ 	const size_t fb_bytes = width * height * 4;
+ 
+-	long smo_key = smo_create(fb_bytes, PROT_READ | PROT_WRITE);
+-	if (smo_key == -1)
++	int shmid = shmget(rand(), fb_bytes, IPC_CREAT | IPC_EXCL | 0666);
++	if (shmid == -1)
+ 		return BAN::Error::from_errno(errno);
+-	BAN::ScopeGuard smo_deleter([&]() { smo_delete(smo_key); });
++	BAN::ScopeGuard shmdeleter([&]() { shmctl(shmid, IPC_RMID, nullptr); });
+ 
+-	uint32_t* fb_addr = static_cast<uint32_t*>(smo_map(smo_key));
+-	if (fb_addr == nullptr)
++	uint32_t* fb_addr = static_cast<uint32_t*>(shmat(shmid, nullptr, 0));
++	if (fb_addr == (void*)-1)
+ 		return BAN::Error::from_errno(errno);
+ 	memset(fb_addr, 0xFF, fb_bytes);
+-	BAN::ScopeGuard smo_unmapper([&]() { munmap(fb_addr, fb_bytes); });
++	BAN::ScopeGuard shmdetacher([&]() { shmdt(fb_addr); });
+ 
+ 	{
+ 		const auto old_area = m_client_area;
+@@ -70,16 +69,14 @@ BAN::ErrorOr<void> Window::resize(uint32_t width, uint32_t height)
+ 			return title_bar_ret.release_error();
+ 	}
+ 
+-	smo_deleter.disable();
+-	smo_unmapper.disable();
++	shmdetacher.disable();
++	shmdeleter.disable();
+ 
+ 	if (m_fb_addr)
+-		munmap(m_fb_addr, client_width() * client_height() * 4);
+-	if (m_smo_key)
+-		smo_delete(m_smo_key);
++		shmdt(m_fb_addr);
+ 
+ 	m_fb_addr = fb_addr;
+-	m_smo_key = smo_key;
++	m_smo_key = shmid;
+ 
+ 	m_client_area.max_x = m_client_area.min_x + width;
+ 	m_client_area.max_y = m_client_area.min_y + height;
+diff --git a/userspace/programs/WindowServer/WindowServer.cpp b/userspace/programs/WindowServer/WindowServer.cpp
+index 2c67d6c0..600704fd 100644
+--- a/userspace/programs/WindowServer/WindowServer.cpp
++++ b/userspace/programs/WindowServer/WindowServer.cpp
+@@ -8,19 +8,20 @@
+ #include <LibInput/KeyboardLayout.h>
+ 
+ #include <stdlib.h>
+-#include <sys/banan-os.h>
+-#include <sys/ioctl.h>
+-#include <sys/mman.h>
+-#include <sys/socket.h>
+ #include <unistd.h>
+ 
+ #include <emmintrin.h>
+ 
++#include <SDL2/SDL.h>
++
++extern SDL_Renderer* g_renderer;
++extern SDL_Texture* g_texture;
++
+ WindowServer::WindowServer(Framebuffer& framebuffer, int32_t corner_radius)
+ 	: m_framebuffer(framebuffer)
+ 	, m_corner_radius(corner_radius)
+ 	, m_cursor({ framebuffer.width / 2, framebuffer.height / 2 })
+-	, m_font(MUST(LibFont::Font::load("/usr/share/fonts/lat0-16.psfu"_sv)))
++	, m_font(MUST(LibFont::Font::load("./lat0-16.psfu"_sv)))
+ {
+ 	MUST(m_background_image.resize(m_framebuffer.width * m_framebuffer.height, 0xFF101010));
+ 
+@@ -440,7 +441,7 @@ static void update_volume(const char* new_volume)
+ 
+ void WindowServer::on_key_event(LibInput::KeyEvent event)
+ {
+-	if (event.key == LibInput::Key::Super)
++	if (event.key == LibInput::Key::RightCtrl)
+ 		m_is_mod_key_held = event.pressed();
+ 
+ 	if (event.pressed() && event.key == LibInput::Key::VolumeDown)
+@@ -461,7 +462,7 @@ void WindowServer::on_key_event(LibInput::KeyEvent event)
+ 		pid_t pid = fork();
+ 		if (pid == 0)
+ 		{
+-			execl("/usr/bin/Terminal", "Terminal", nullptr);
++			execl("./build/banan-os/userspace/programs/Terminal/Terminal", "Terminal", nullptr);
+ 			exit(1);
+ 		}
+ 		if (pid == -1)
+@@ -475,7 +476,7 @@ void WindowServer::on_key_event(LibInput::KeyEvent event)
+ 		pid_t pid = fork();
+ 		if (pid == 0)
+ 		{
+-			execl("/usr/bin/ProgramLauncher", "ProgramLauncher", nullptr);
++			execl("./build/banan-os/userspace/programs/ProgramLauncher/ProgramLauncher", "ProgramLauncher", nullptr);
+ 			exit(1);
+ 		}
+ 		if (pid == -1)
+@@ -1599,16 +1600,34 @@ void WindowServer::sync()
+ 
+ 	for (size_t i = 0; i < m_damaged_area_count; i++)
+ 	{
+-		const fb_msync_region region {
+-			.min_x = static_cast<uint32_t>(m_damaged_areas[i].min_x),
+-			.min_y = static_cast<uint32_t>(m_damaged_areas[i].min_y),
+-			.max_x = static_cast<uint32_t>(m_damaged_areas[i].max_x),
+-			.max_y = static_cast<uint32_t>(m_damaged_areas[i].max_y),
++		const SDL_Rect rect {
++			.x = m_damaged_areas[i].min_x,
++			.y = m_damaged_areas[i].min_y,
++			.w = m_damaged_areas[i].max_x - m_damaged_areas[i].min_x,
++			.h = m_damaged_areas[i].max_y - m_damaged_areas[i].min_y,
+ 		};
+-		ioctl(m_framebuffer.fd, FB_MSYNC_RECTANGLE, &region);
++
++		void* pixels;
++		int pitch;
++		SDL_LockTexture(g_texture, &rect, &pixels, &pitch);
++
++		for (int32_t y_off = 0; y_off < rect.h; y_off++)
++		{
++			memcpy(
++				static_cast<uint8_t*>(pixels) + y_off * pitch,
++				&m_framebuffer.mmap[(rect.y + y_off) * m_framebuffer.width + rect.x],
++				rect.w * sizeof(uint32_t)
++			);
++		}
++
++		SDL_UnlockTexture(g_texture);
+ 	}
+ 
+ 	m_damaged_area_count = 0;
++
++	SDL_RenderClear(g_renderer);
++	SDL_RenderCopy(g_renderer, g_texture, NULL, NULL);
++	SDL_RenderPresent(g_renderer);
+ }
+ 
+ Rectangle WindowServer::cursor_area() const
+diff --git a/userspace/programs/WindowServer/WindowServer.h b/userspace/programs/WindowServer/WindowServer.h
+index 94fbc774..bcd7a6b9 100644
+--- a/userspace/programs/WindowServer/WindowServer.h
++++ b/userspace/programs/WindowServer/WindowServer.h
+@@ -62,6 +62,7 @@ public:
+ 
+ 	bool is_damaged() const { return m_damaged_area_count > 0 || m_is_bouncing_window; }
+ 	bool is_stopped() const { return m_is_stopped; }
++	void stop() { m_is_stopped = true; }
+ 
+ private:
+ 	void on_mouse_move_impl(int32_t new_x, int32_t new_y);
+diff --git a/userspace/programs/WindowServer/main.cpp b/userspace/programs/WindowServer/main.cpp
+index 46f2ba6d..520c8e7d 100644
+--- a/userspace/programs/WindowServer/main.cpp
++++ b/userspace/programs/WindowServer/main.cpp
+@@ -10,7 +10,6 @@
+ #include <limits.h>
+ #include <signal.h>
+ #include <stdlib.h>
+-#include <sys/banan-os.h>
+ #include <sys/epoll.h>
+ #include <sys/mman.h>
+ #include <sys/socket.h>
+@@ -150,6 +149,8 @@ int open_server_fd()
+ 
+ int g_epoll_fd = -1;
+ 
++static void poll_sdl_events(WindowServer&);
++
+ int main()
+ {
+ 	srand(time(nullptr));
+@@ -181,14 +182,6 @@ int main()
+ 		}
+ 	}
+ 
+-	if (tty_ctrl(STDIN_FILENO, TTY_CMD_UNSET, TTY_FLAG_ENABLE_INPUT) == -1)
+-	{
+-		dwarnln("tty_ctrl: {}", strerror(errno));
+-		return 1;
+-	}
+-
+-	atexit([]() { tty_ctrl(STDIN_FILENO, TTY_CMD_SET, TTY_FLAG_ENABLE_INPUT); });
+-
+ 	constexpr int non_terminating_signals[] {
+ 		SIGCHLD,
+ 		SIGCONT,
+@@ -196,11 +189,12 @@ int main()
+ 		SIGTSTP,
+ 		SIGTTIN,
+ 		SIGTTOU,
++		SIGWINCH,
+ 	};
+ 	constexpr int ignored_signals[] {
+ 		SIGPIPE,
+ 	};
+-	for (int sig = _SIGMIN; sig <= _SIGMAX; sig++)
++	for (int sig = 1; sig < NSIG; sig++)
+ 		signal(sig, exit);
+ 	for (int sig : non_terminating_signals)
+ 		signal(sig, SIG_DFL);
+@@ -208,51 +202,15 @@ int main()
+ 		signal(sig, SIG_IGN);
+ 
+ 	MUST(LibInput::KeyboardLayout::initialize());
+-	MUST(LibInput::KeyboardLayout::get().load_from_file("/usr/share/keymaps/us.keymap"_sv));
+-
+-	int keyboard_fd = open("/dev/keyboard", O_RDONLY | O_CLOEXEC);
+-	if (keyboard_fd == -1)
+-		dwarnln("open keyboard: {}", strerror(errno));
+-	else
+-	{
+-		epoll_event event {
+-			.events = EPOLLIN,
+-			.data = { .fd = keyboard_fd },
+-		};
+-		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, keyboard_fd, &event) == -1)
+-		{
+-			dwarnln("epoll_ctl keyboard: {}", strerror(errno));
+-			close(keyboard_fd);
+-			keyboard_fd = -1;
+-		}
+-	}
+-
+-	int mouse_fd = open("/dev/mouse", O_RDONLY | O_CLOEXEC);
+-	if (mouse_fd == -1)
+-		dwarnln("open mouse: {}", strerror(errno));
+-	else
+-	{
+-		epoll_event event {
+-			.events = EPOLLIN,
+-			.data = { .fd = mouse_fd },
+-		};
+-		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, mouse_fd, &event) == -1)
+-		{
+-			dwarnln("epoll_ctl mouse: {}", strerror(errno));
+-			close(mouse_fd);
+-			mouse_fd = -1;
+-		}
+-	}
++	MUST(LibInput::KeyboardLayout::get().load_from_file("./us.keymap"_sv));
+ 
+ 	dprintln("Window server started");
+ 
+-	if (access("/usr/bin/xbanan", X_OK) == 0)
++	if (access("./build/xbanan/xbanan", X_OK) == 0)
+ 	{
+ 		if (fork() == 0)
+ 		{
+-			dup2(STDDBG_FILENO, STDOUT_FILENO);
+-			dup2(STDDBG_FILENO, STDERR_FILENO);
+-			execl("/usr/bin/xbanan", "xbanan", NULL);
++			execl("./build/xbanan/xbanan", "xbanan", NULL);
+ 			exit(1);
+ 		}
+ 	}
+@@ -276,26 +234,23 @@ int main()
+ 	uint64_t last_sync_us = get_current_us() - sync_interval_us;
+ 	while (!window_server.is_stopped())
+ 	{
+-		timespec* ptimeout = nullptr;
+-
+ 		timespec timeout = {};
+-		if (window_server.is_damaged())
+-		{
+-			if (const auto current_us = get_current_us(); current_us - last_sync_us > sync_interval_us)
+-			{
+-				window_server.sync();
+ 
+-				const auto full_intervals = (current_us - last_sync_us) / sync_interval_us;
+-				last_sync_us += full_intervals * sync_interval_us;
+-			}
++		if (const auto current_us = get_current_us(); current_us - last_sync_us > sync_interval_us)
++		{
++			window_server.sync();
+ 
+-			if (const auto current_us = get_current_us(); current_us - last_sync_us < sync_interval_us)
+-				timeout.tv_nsec = (sync_interval_us - (current_us - last_sync_us)) * 1000;
+-			ptimeout = &timeout;
++			const auto full_intervals = (current_us - last_sync_us) / sync_interval_us;
++			last_sync_us += full_intervals * sync_interval_us;
+ 		}
+ 
++		if (const auto current_us = get_current_us(); current_us - last_sync_us < sync_interval_us)
++			timeout.tv_nsec = (sync_interval_us - (current_us - last_sync_us)) * 1000;
++
++		poll_sdl_events(window_server);
++
+ 		epoll_event events[16];
+-		int epoll_events = epoll_pwait2(g_epoll_fd, events, 16, ptimeout, nullptr);
++		int epoll_events = epoll_pwait2(g_epoll_fd, events, 16, &timeout, nullptr);
+ 		if (epoll_events == -1 && errno != EINTR)
+ 		{
+ 			dwarnln("epoll_pwait2: {}", strerror(errno));
+@@ -333,48 +288,6 @@ int main()
+ 				continue;
+ 			}
+ 
+-			if (events[i].data.fd == keyboard_fd)
+-			{
+-				ASSERT(events[i].events & EPOLLIN);
+-
+-				LibInput::RawKeyEvent event;
+-				if (read(keyboard_fd, &event, sizeof(event)) == -1)
+-				{
+-					dwarnln("read keyboard: {}", strerror(errno));
+-					continue;
+-				}
+-				window_server.on_key_event(LibInput::KeyboardLayout::get().key_event_from_raw(event));
+-				continue;
+-			}
+-
+-			if (events[i].data.fd == mouse_fd)
+-			{
+-				ASSERT(events[i].events & EPOLLIN);
+-
+-				LibInput::MouseEvent event;
+-				if (read(mouse_fd, &event, sizeof(event)) == -1)
+-				{
+-					dwarnln("read mouse: {}", strerror(errno));
+-					continue;
+-				}
+-				switch (event.type)
+-				{
+-					case LibInput::MouseEventType::MouseButtonEvent:
+-						window_server.on_mouse_button(event.button_event);
+-						break;
+-					case LibInput::MouseEventType::MouseMoveEvent:
+-						window_server.on_mouse_move(event.move_event);
+-						break;
+-					case LibInput::MouseEventType::MouseMoveAbsEvent:
+-						window_server.on_mouse_move_abs(event.move_abs_event);
+-						break;
+-					case LibInput::MouseEventType::MouseScrollEvent:
+-						window_server.on_mouse_scroll(event.scroll_event);
+-						break;
+-				}
+-				continue;
+-			}
+-
+ 			const int client_fd = events[i].data.fd;
+ 			if (events[i].events & (EPOLLHUP | EPOLLERR))
+ 			{
+@@ -500,3 +413,237 @@ int main()
+ 		}
+ 	}
+ }
++
++#include <SDL2/SDL.h>
++
++extern SDL_Window* g_window;
++struct Keymap
++{
++	consteval Keymap()
++	{
++		for (auto& scancode : map)
++			scancode = 0;
++
++		using LibInput::keycode_normal;
++		using LibInput::keycode_function;
++		using LibInput::keycode_numpad;
++
++		map[SDL_SCANCODE_GRAVE]     = keycode_normal(0,  0);
++		map[SDL_SCANCODE_1]         = keycode_normal(0,  1);
++		map[SDL_SCANCODE_2]         = keycode_normal(0,  2);
++		map[SDL_SCANCODE_3]         = keycode_normal(0,  3);
++		map[SDL_SCANCODE_4]         = keycode_normal(0,  4);
++		map[SDL_SCANCODE_5]         = keycode_normal(0,  5);
++		map[SDL_SCANCODE_6]         = keycode_normal(0,  6);
++		map[SDL_SCANCODE_7]         = keycode_normal(0,  7);
++		map[SDL_SCANCODE_8]         = keycode_normal(0,  8);
++		map[SDL_SCANCODE_9]         = keycode_normal(0,  9);
++		map[SDL_SCANCODE_0]         = keycode_normal(0, 10);
++		map[SDL_SCANCODE_MINUS]     = keycode_normal(0, 11);
++		map[SDL_SCANCODE_EQUALS]    = keycode_normal(0, 12);
++		map[SDL_SCANCODE_BACKSPACE] = keycode_normal(0, 13);
++
++		map[SDL_SCANCODE_TAB]          = keycode_normal(1,  0);
++		map[SDL_SCANCODE_Q]            = keycode_normal(1,  1);
++		map[SDL_SCANCODE_W]            = keycode_normal(1,  2);
++		map[SDL_SCANCODE_E]            = keycode_normal(1,  3);
++		map[SDL_SCANCODE_R]            = keycode_normal(1,  4);
++		map[SDL_SCANCODE_T]            = keycode_normal(1,  5);
++		map[SDL_SCANCODE_Y]            = keycode_normal(1,  6);
++		map[SDL_SCANCODE_U]            = keycode_normal(1,  7);
++		map[SDL_SCANCODE_I]            = keycode_normal(1,  8);
++		map[SDL_SCANCODE_O]            = keycode_normal(1,  9);
++		map[SDL_SCANCODE_P]            = keycode_normal(1, 10);
++		map[SDL_SCANCODE_LEFTBRACKET]  = keycode_normal(1, 11);
++		map[SDL_SCANCODE_RIGHTBRACKET] = keycode_normal(1, 12);
++
++		map[SDL_SCANCODE_CAPSLOCK]   = keycode_normal(2,  0);
++		map[SDL_SCANCODE_A]          = keycode_normal(2,  1);
++		map[SDL_SCANCODE_S]          = keycode_normal(2,  2);
++		map[SDL_SCANCODE_D]          = keycode_normal(2,  3);
++		map[SDL_SCANCODE_F]          = keycode_normal(2,  4);
++		map[SDL_SCANCODE_G]          = keycode_normal(2,  5);
++		map[SDL_SCANCODE_H]          = keycode_normal(2,  6);
++		map[SDL_SCANCODE_J]          = keycode_normal(2,  7);
++		map[SDL_SCANCODE_K]          = keycode_normal(2,  8);
++		map[SDL_SCANCODE_L]          = keycode_normal(2,  9);
++		map[SDL_SCANCODE_SEMICOLON]  = keycode_normal(2, 10);
++		map[SDL_SCANCODE_APOSTROPHE] = keycode_normal(2, 11);
++		map[SDL_SCANCODE_BACKSLASH]  = keycode_normal(2, 12);
++		map[SDL_SCANCODE_RETURN]     = keycode_normal(2, 13);
++
++		map[SDL_SCANCODE_LSHIFT]         = keycode_normal(3,  0);
++		map[SDL_SCANCODE_NONUSBACKSLASH] = keycode_normal(3,  1);
++		map[SDL_SCANCODE_Z]              = keycode_normal(3,  2);
++		map[SDL_SCANCODE_X]              = keycode_normal(3,  3);
++		map[SDL_SCANCODE_C]              = keycode_normal(3,  4);
++		map[SDL_SCANCODE_V]              = keycode_normal(3,  5);
++		map[SDL_SCANCODE_B]              = keycode_normal(3,  6);
++		map[SDL_SCANCODE_N]              = keycode_normal(3,  7);
++		map[SDL_SCANCODE_M]              = keycode_normal(3,  8);
++		map[SDL_SCANCODE_COMMA]          = keycode_normal(3,  9);
++		map[SDL_SCANCODE_PERIOD]         = keycode_normal(3, 10);
++		map[SDL_SCANCODE_SLASH]          = keycode_normal(3, 11);
++		map[SDL_SCANCODE_RSHIFT]         = keycode_normal(3, 12);
++
++		map[SDL_SCANCODE_LCTRL] = keycode_normal(4, 0);
++		map[SDL_SCANCODE_LGUI]  = keycode_normal(4, 1);
++		map[SDL_SCANCODE_LALT]  = keycode_normal(4, 2);
++		map[SDL_SCANCODE_SPACE] = keycode_normal(4, 3);
++		map[SDL_SCANCODE_RALT]  = keycode_normal(4, 4);
++		map[SDL_SCANCODE_RCTRL] = keycode_normal(4, 5);
++
++		map[SDL_SCANCODE_UP]    = keycode_normal(5, 0);
++		map[SDL_SCANCODE_LEFT]  = keycode_normal(5, 1);
++		map[SDL_SCANCODE_DOWN]  = keycode_normal(5, 2);
++		map[SDL_SCANCODE_RIGHT] = keycode_normal(5, 3);
++
++		map[SDL_SCANCODE_ESCAPE]      = keycode_function(0);
++		map[SDL_SCANCODE_F1]          = keycode_function(1);
++		map[SDL_SCANCODE_F2]          = keycode_function(2);
++		map[SDL_SCANCODE_F3]          = keycode_function(3);
++		map[SDL_SCANCODE_F4]          = keycode_function(4);
++		map[SDL_SCANCODE_F5]          = keycode_function(5);
++		map[SDL_SCANCODE_F6]          = keycode_function(6);
++		map[SDL_SCANCODE_F7]          = keycode_function(7);
++		map[SDL_SCANCODE_F8]          = keycode_function(8);
++		map[SDL_SCANCODE_F9]          = keycode_function(9);
++		map[SDL_SCANCODE_F10]         = keycode_function(10);
++		map[SDL_SCANCODE_F11]         = keycode_function(11);
++		map[SDL_SCANCODE_F12]         = keycode_function(12);
++		map[SDL_SCANCODE_INSERT]      = keycode_function(13);
++		map[SDL_SCANCODE_PRINTSCREEN] = keycode_function(14);
++		map[SDL_SCANCODE_DELETE]      = keycode_function(15);
++		map[SDL_SCANCODE_HOME]        = keycode_function(16);
++		map[SDL_SCANCODE_END]         = keycode_function(17);
++		map[SDL_SCANCODE_PAGEUP]      = keycode_function(18);
++		map[SDL_SCANCODE_PAGEDOWN]    = keycode_function(19);
++		map[SDL_SCANCODE_SCROLLLOCK]  = keycode_function(20);
++
++		map[SDL_SCANCODE_NUMLOCKCLEAR] = keycode_numpad(0, 0);
++		map[SDL_SCANCODE_KP_DIVIDE]    = keycode_numpad(0, 1);
++		map[SDL_SCANCODE_KP_MULTIPLY]  = keycode_numpad(0, 2);
++		map[SDL_SCANCODE_KP_MINUS]     = keycode_numpad(0, 3);
++		map[SDL_SCANCODE_KP_7]         = keycode_numpad(1, 0);
++		map[SDL_SCANCODE_KP_8]         = keycode_numpad(1, 1);
++		map[SDL_SCANCODE_KP_9]         = keycode_numpad(1, 2);
++		map[SDL_SCANCODE_KP_PLUS]      = keycode_numpad(1, 3);
++		map[SDL_SCANCODE_KP_4]         = keycode_numpad(2, 0);
++		map[SDL_SCANCODE_KP_5]         = keycode_numpad(2, 1);
++		map[SDL_SCANCODE_KP_6]         = keycode_numpad(2, 2);
++		map[SDL_SCANCODE_KP_1]         = keycode_numpad(3, 0);
++		map[SDL_SCANCODE_KP_2]         = keycode_numpad(3, 1);
++		map[SDL_SCANCODE_KP_3]         = keycode_numpad(3, 2);
++		map[SDL_SCANCODE_KP_ENTER]     = keycode_numpad(3, 3);
++		map[SDL_SCANCODE_KP_0]         = keycode_numpad(4, 0);
++		map[SDL_SCANCODE_KP_COMMA]     = keycode_numpad(4, 1);
++	};
++
++	uint8_t map[SDL_NUM_SCANCODES];
++};
++static Keymap s_sdl_keymap;
++
++static void poll_sdl_events(WindowServer& window_server)
++{
++	{
++		static int prev_x { 0 };
++		static int prev_y { 0 };
++
++		int x, y;
++		SDL_GetMouseState(&x, &y);
++
++		if (prev_x != x || prev_y != y)
++		{
++			int w, h;
++			SDL_GetWindowSize(g_window, &w, &h);
++
++			window_server.on_mouse_move_abs({
++				.abs_x = x,
++				.abs_y = y,
++				.min_x = 0,
++				.min_y = 0,
++				.max_x = w,
++				.max_y = h,
++			});
++		}
++
++		prev_x = x;
++		prev_y = y;
++	}
++
++	SDL_Event event;
++	while (SDL_PollEvent(&event))
++	{
++		switch (event.type)
++		{
++			case SDL_QUIT:
++				window_server.stop();
++				break;
++			case SDL_WINDOWEVENT:
++				if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
++					SDL_ShowCursor(SDL_DISABLE);
++				if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
++					SDL_ShowCursor(SDL_ENABLE);
++				break;
++			case SDL_KEYDOWN:
++			case SDL_KEYUP:
++			{
++				uint16_t modifier = 0;
++				if (event.key.keysym.mod & KMOD_LSHIFT)
++					modifier |= LibInput::KeyEvent::Modifier::LShift;
++				if (event.key.keysym.mod & KMOD_RSHIFT)
++					modifier |= LibInput::KeyEvent::Modifier::RShift;
++				if (event.key.keysym.mod & KMOD_LCTRL)
++					modifier |= LibInput::KeyEvent::Modifier::LCtrl;
++				if (event.key.keysym.mod & KMOD_RCTRL)
++					modifier |= LibInput::KeyEvent::Modifier::RCtrl;
++				if (event.key.keysym.mod & KMOD_LALT)
++					modifier |= LibInput::KeyEvent::Modifier::LAlt;
++				if (event.key.keysym.mod & KMOD_RALT)
++					modifier |= LibInput::KeyEvent::Modifier::RAlt;
++				if (event.key.keysym.mod & KMOD_NUM)
++					modifier |= LibInput::KeyEvent::Modifier::NumLock;
++				if (event.key.keysym.mod & KMOD_SCROLL)
++					modifier |= LibInput::KeyEvent::Modifier::ScrollLock;
++				if (event.key.keysym.mod & KMOD_CAPS)
++					modifier |= LibInput::KeyEvent::Modifier::CapsLock;
++				if (event.key.state == SDL_PRESSED)
++					modifier |= LibInput::KeyEvent::Modifier::Pressed;
++
++				window_server.on_key_event(LibInput::KeyboardLayout::get().key_event_from_raw({
++					.modifier = modifier,
++					.keycode = s_sdl_keymap.map[event.key.keysym.scancode],
++				}));
++
++				break;
++			}
++			case SDL_MOUSEBUTTONDOWN:
++			case SDL_MOUSEBUTTONUP:
++			{
++				LibInput::MouseButton button_map[] {
++					[0] = LibInput::MouseButton::Left,
++					[SDL_BUTTON_LEFT] = LibInput::MouseButton::Left,
++					[SDL_BUTTON_MIDDLE] = LibInput::MouseButton::Middle,
++					[SDL_BUTTON_RIGHT] = LibInput::MouseButton::Right,
++					[SDL_BUTTON_X1] = LibInput::MouseButton::Extra1,
++					[SDL_BUTTON_X2] = LibInput::MouseButton::Extra2,
++				};
++
++				window_server.on_mouse_button({
++					.button = button_map[event.button.button],
++					.pressed = (event.button.state == SDL_PRESSED),
++				});
++
++				break;
++			}
++			case SDL_MOUSEWHEEL:
++			{
++				window_server.on_mouse_scroll({
++					.scroll = event.wheel.y,
++				});
++
++				break;
++			}
++		}
++	}
++}
+-- 
+2.53.0
+

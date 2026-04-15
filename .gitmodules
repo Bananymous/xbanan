@@ -1,0 +1,3 @@
+[submodule "banan-os"]
+	path = banan-os
+	url = https://git.bananymous.com/Bananymous/banan-os.git

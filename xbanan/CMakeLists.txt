@@ -12,12 +12,7 @@ set(SOURCES
 )
 
 option(ENABLE_GLX "enable glx extension" ON)
-
-include(CheckSymbolExists)
-include(CMakeDependentOption)
-check_symbol_exists(shmat "sys/shm.h" HAVE_SHMAT)
-check_symbol_exists(shmdt "sys/shm.h" HAVE_SHMDT)
-cmake_dependent_option(ENABLE_SHM "enable shm extension" ON "HAVE_SHMAT;HAVE_SHMDT" OFF)
+option(ENABLE_SHM "enable shm extension" ON)
 
 if(ENABLE_GLX)
 	set(SOURCES ${SOURCES} ExtGLX.cpp)

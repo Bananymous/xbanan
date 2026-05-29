@@ -87,10 +87,9 @@ BAN::ErrorOr<DrawableInfo> get_drawable_info(Client& client_info, CARD32 drawabl
 		case Object::Type::Window:
 		{
 			auto& window = drawable_it->value->object.get<Object::Window>();
-			auto& texture = window.texture();
-			info.data_u32 = texture.pixels().data();
-			info.w = texture.width();
-			info.h = texture.height();
+			info.data_u32 = window.pixels.data();
+			info.w = window.width;
+			info.h = window.height;
 			info.depth = window.depth;
 			break;
 		}
@@ -108,4 +107,15 @@ BAN::ErrorOr<DrawableInfo> get_drawable_info(Client& client_info, CARD32 drawabl
 	}
 
 	return info;
+}
+
+Object::Cursor& get_cursor_safe(CURSOR cid)
+{
+	static Object::Cursor dummy {};
+	auto it = g_objects.find(cid);
+	if (it == g_objects.end())
+		return dummy;
+	if (it->value->type != Object::Type::Cursor)
+		return dummy;
+	return it->value->object.get<Object::Cursor>();
 }

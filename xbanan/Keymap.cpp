@@ -14,6 +14,8 @@
 
 uint32_t g_keymap[0x100][g_keymap_layers];
 
+uint8_t g_pressed_keys[32] {};
+
 static constexpr uint32_t my_key_to_x_keysym(LibInput::Key key)
 {
 	using LibInput::Key;

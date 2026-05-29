@@ -1,13 +1,14 @@
 #pragma once
 
 #include "Font.h"
+#include "Platform.h"
+#include "Types.h"
 
-#include <BAN/Vector.h>
-#include <BAN/UniqPtr.h>
 #include <BAN/HashMap.h>
 #include <BAN/HashSet.h>
-
-#include <LibGUI/Window.h>
+#include <BAN/String.h>
+#include <BAN/UniqPtr.h>
+#include <BAN/Vector.h>
 
 #include <X11/Xproto.h>
 
@@ -17,15 +18,6 @@
 #undef dprintln
 #define dprintln(...)
 #endif
-
-typedef CARD32 ATOM;
-typedef CARD32 BITGRAVITY;
-typedef CARD32 COLORMAP;
-typedef CARD32 CURSOR;
-typedef CARD32 PIXMAP;
-typedef CARD32 VISUALID;
-typedef CARD32 WINDOW;
-typedef CARD32 WINGRAVITY;
 
 struct Property
 {
@@ -60,6 +52,8 @@ struct Object
 
 	struct Window
 	{
+		Client& owner;
+
 		bool mapped { false };
 		bool focused { false };
 		bool fullscreen { false };
@@ -72,32 +66,18 @@ struct Object
 		CURSOR cursor;
 		CARD16 c_class;
 		BAN::Vector<WINDOW> children;
-		BAN::Variant<
-			BAN::UniqPtr<LibGUI::Window>,
-			LibGUI::Texture
-		> window;
+
+		uint32_t width  { 0 };
+		uint32_t height { 0 };
+		BAN::Vector<uint32_t> pixels;
+
+		uint32_t background { 0 };
+
+		BAN::UniqPtr<PlatformWindow> platform_window;
 
 		BAN::HashMap<Client*, uint32_t> event_masks;
 
 		BAN::HashMap<ATOM, Property> properties;
-
-		LibGUI::Texture& texture()
-		{
-			if (window.has<LibGUI::Texture>())
-				return window.get<LibGUI::Texture>();
-			if (window.has<BAN::UniqPtr<LibGUI::Window>>())
-				return window.get<BAN::UniqPtr<LibGUI::Window>>()->texture();
-			ASSERT_NOT_REACHED();
-		}
-
-		const LibGUI::Texture& texture() const
-		{
-			if (window.has<LibGUI::Texture>())
-				return window.get<LibGUI::Texture>();
-			if (window.has<BAN::UniqPtr<LibGUI::Window>>())
-				return window.get<BAN::UniqPtr<LibGUI::Window>>()->texture();
-			ASSERT_NOT_REACHED();
-		}
 
 		uint32_t full_event_mask() const;
 		BAN::ErrorOr<void> send_event(xEvent event, uint32_t event_mask);
@@ -181,17 +161,17 @@ struct EpollThingy
 	enum class Type
 	{
 		Client,
-		Window,
+		Event,
 	};
 
 	Type type;
-	BAN::Variant<Client, LibGUI::Window*> value;
+	BAN::Variant<Client, void*> value;
 };
 
 extern const xPixmapFormat g_formats[6];
-extern const xWindowRoot g_root;
 extern const xDepth g_depth;
 extern const xVisualType g_visual;
+extern xWindowRoot g_root;
 
 extern BAN::HashMap<CARD32, BAN::UniqPtr<Object>> g_objects;
 

@@ -300,6 +300,9 @@ BAN::ErrorOr<void> poly_fill_rectangle(Client& client_info, BAN::ConstByteSpan p
 		const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width, out_w);
 		const int32_t max_y = BAN::Math::min<int32_t>(rect.y + rect.height, out_h);
 
+		if (min_x >= max_x || min_y >= max_y)
+			continue;
+
 		for (int32_t y = min_y; y < max_y; y++)
 			for (int32_t x = min_x; x < max_x; x++)
 				if (!gc.is_clipped(x, y))
@@ -350,6 +353,9 @@ BAN::ErrorOr<void> poly_fill_arc(Client& client_info, BAN::ConstByteSpan packet)
 
 		const int32_t max_x = BAN::Math::min<int32_t>(out_w, arc.x + arc.width);
 		const int32_t max_y = BAN::Math::min<int32_t>(out_h, arc.y + arc.height);
+
+		if (min_x >= max_x || min_y >= max_y)
+			continue;
 
 		const auto rx = arc.width / 2;
 		const auto ry = arc.height / 2;

@@ -11,27 +11,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define USE_UNIX_SOCKET 0
+#define USE_UNIX_SOCKET 1
 
 #if USE_UNIX_SOCKET
 #include <sys/un.h>
 #else
 #include <netinet/in.h>
 #endif
-
-static BAN::UniqPtr<LibGUI::Window> s_dummy_window =
-	[]() {
-		auto attributes = LibGUI::Window::default_attributes;
-		attributes.shown = false;
-		return MUST(LibGUI::Window::create(0, 0, ""_sv, attributes));
-	}();
-
-static const xRectangle s_screen_bounds = {
-	.x = 0,
-	.y = 0,
-	.width = static_cast<CARD16>(s_dummy_window->width()),
-	.height = static_cast<CARD16>(s_dummy_window->height()),
-};
 
 const xPixmapFormat g_formats[6] {
 	{
@@ -81,16 +67,16 @@ const xVisualType g_visual {
 	.blueMask = 0x0000FF,
 };
 
-const xWindowRoot g_root {
+xWindowRoot g_root {
 	.windowId = 2,
 	.defaultColormap = 0,
 	.whitePixel = 0xFFFFFF,
 	.blackPixel = 0x000000,
 	.currentInputMask = 0,
-	.pixWidth = s_screen_bounds.width,
-	.pixHeight = s_screen_bounds.height,
-	.mmWidth  = static_cast<CARD16>(s_screen_bounds.width  * 254 / 960), // 96 DPI
-	.mmHeight = static_cast<CARD16>(s_screen_bounds.height * 254 / 960), // 96 DPI
+	.pixWidth = 0,
+	.pixHeight = 0,
+	.mmWidth  = 0,
+	.mmHeight = 0,
 	.minInstalledMaps = 1,
 	.maxInstalledMaps = 1,
 	.rootVisualID = g_visual.visualID,
@@ -183,17 +169,6 @@ int main()
 		}
 	}
 
-	{
-		epoll_event event { .events = EPOLLIN, .data = { .ptr = (void*)1 } };
-		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, s_dummy_window->server_fd(), &event) == -1)
-		{
-			perror("xbanan: epoll_ctl");
-			return 1;
-		}
-
-		s_dummy_window->request_resize(1, 1);
-	}
-
 #define APPEND_ATOM(name) do { \
 			MUST(g_atoms_id_to_name.insert(name, #name##_sv.substring(3))); \
 			MUST(g_atoms_name_to_id.insert(#name##_sv.substring(3), name)); \
@@ -281,6 +256,14 @@ int main()
 
 	MUST(initialize_keymap());
 
+	uint32_t display_w, display_h;
+	if (!g_platform_ops.initialize(&display_w, &display_h))
+		return 1;
+	g_root.pixWidth  = display_w;
+	g_root.pixHeight = display_h;
+	g_root.mmWidth   = static_cast<CARD16>(display_w * 254 / 960); // 96 DPI
+	g_root.mmHeight  = static_cast<CARD16>(display_h * 254 / 960); // 96 DPI
+
 	printf("xbanan started\n");
 
 	const auto close_client =
@@ -309,28 +292,29 @@ int main()
 					continue;
 
 				auto& object = *it->value;
-				if (object.type == Object::Type::Window)
+				switch (object.type)
 				{
-					auto& window = object.object.get<Object::Window>();
-					if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+					case Object::Type::Visual:
+					case Object::Type::Cursor:
+					case Object::Type::Pixmap:
+					case Object::Type::GraphicsContext:
+					case Object::Type::Font:
+					case Object::Type::Window:
+						break;
+					case Object::Type::Extension:
 					{
-						auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
-						epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, gui_window->server_fd(), nullptr);
-						g_epoll_thingies.remove(gui_window->server_fd());
+						auto& extension = object.object.get<Object::Extension>();
+						extension.destructor(extension);
+						break;
 					}
-				}
-				if (object.type == Object::Type::Extension)
-				{
-					auto& extension = object.object.get<Object::Extension>();
-					extension.destructor(extension);
 				}
 
 				g_objects.remove(it);
 			}
 
 			epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
-			close(client_fd);
 			g_epoll_thingies.remove(client_fd);
+			close(client_fd);
 
 			if (client_fd == g_server_grabber_fd)
 			{
@@ -353,15 +337,18 @@ int main()
 			}
 		};
 
+	Client dummy_client {};
 	MUST(g_objects.insert(g_root.windowId,
 		MUST(BAN::UniqPtr<Object>::create(Object {
 			.type = Object::Type::Window,
 			.object = Object::Window {
+				.owner = dummy_client,
 				.mapped = true,
 				.depth = g_root.rootDepth,
 				.parent = None,
 				.c_class = InputOutput,
-				.window = {},
+				.width = g_root.pixWidth,
+				.height = g_root.pixHeight,
 			}
 		}))
 	));
@@ -412,21 +399,14 @@ int main()
 				continue;
 			}
 
-			if (events[i].data.ptr == (void*)1)
-			{
-				s_dummy_window->poll_events();
-				continue;
-			}
-
 			auto it = g_epoll_thingies.find(events[i].data.fd);
 			if (it == g_epoll_thingies.end())
 				continue;
 			auto& epoll_thingy = it->value;
 
-			if (epoll_thingy.type == EpollThingy::Type::Window)
+			if (epoll_thingy.type == EpollThingy::Type::Event)
 			{
-				auto* window = epoll_thingy.value.get<LibGUI::Window*>();
-				window->poll_events();
+				g_platform_ops.poll_events(epoll_thingy.value.get<void*>());
 				continue;
 			}
 

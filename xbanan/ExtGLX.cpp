@@ -337,7 +337,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 
 			const auto& object = g_objects[request.drawable];
 			ASSERT(object->type == Object::Type::Window);
-			const auto& texture = object->object.get<Object::Window>().texture();
+			const auto& window = object->object.get<Object::Window>();
 
 			xGLXGetDrawableAttributesReply reply {
 				.type = X_Reply,
@@ -348,16 +348,16 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 			TRY(encode(client_info.output_buffer, reply));
 
 			TRY(encode<CARD32>(client_info.output_buffer, GLX_WIDTH));
-			TRY(encode<CARD32>(client_info.output_buffer, texture.width()));
+			TRY(encode<CARD32>(client_info.output_buffer, window.width));
 
 			TRY(encode<CARD32>(client_info.output_buffer, GLX_HEIGHT));
-			TRY(encode<CARD32>(client_info.output_buffer, texture.height()));
+			TRY(encode<CARD32>(client_info.output_buffer, window.height));
 
 			TRY(encode<CARD32>(client_info.output_buffer, GLX_PRESERVED_CONTENTS));
 			TRY(encode<CARD32>(client_info.output_buffer, xTrue));
 
 			TRY(encode<CARD32>(client_info.output_buffer, GLX_LARGEST_PBUFFER));
-			TRY(encode<CARD32>(client_info.output_buffer, texture.width() * texture.height()));
+			TRY(encode<CARD32>(client_info.output_buffer, window.width * window.height));
 
 			TRY(encode<CARD32>(client_info.output_buffer, GLX_FBCONFIG_ID));
 			TRY(encode<CARD32>(client_info.output_buffer, 1));

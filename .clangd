@@ -1,0 +1,9 @@
+Diagnostics:
+  Suppress: [
+    c99-designator,
+  ]
+
+CompileFlags:
+  Add: [
+    -std=c++20,
+  ]

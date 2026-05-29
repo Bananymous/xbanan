@@ -159,7 +159,6 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 		{
 			auto request = decode<xShmPutImageReq>(packet).value();
 
-#if 0
 			dprintln("ShmPutImage");
 			dprintln("  drawable:    {}", request.drawable);
 			dprintln("  gc:          {}", request.gc);
@@ -176,7 +175,6 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 			dprintln("  sendEvent:   {}", request.sendEvent);
 			dprintln("  shmseg:      {}", request.shmseg);
 			dprintln("  offset:      {}", request.offset);
-#endif
 
 			void* shm_segment = TRY(get_shmseg(client_info, request.shmseg, op_major, op_minor));
 

@@ -1,3 +1,4 @@
+#include "Base.h"
 #include "Definitions.h"
 #include "Drawing.h"
 #include "Extensions.h"
@@ -6,6 +7,8 @@
 #include "Keymap.h"
 #include "SafeGetters.h"
 #include "Utils.h"
+
+#include <LibInput/KeyEvent.h>
 
 #include <X11/X.h>
 #include <X11/Xatom.h>
@@ -21,12 +24,9 @@ struct Selection
 
 static BAN::HashMap<ATOM, Selection> g_selections;
 
-static CARD16 s_keymask { 0 };
-static CARD16 s_butmask { 0 };
-
-static WINDOW s_focus_window { None };
-
-static BYTE s_pressed_keys[32] {};
+CARD16 g_keymask { 0 };
+CARD16 g_butmask { 0 };
+WINDOW g_focus_window { None };
 
 static const char* s_opcode_to_name[] {
 	[0] = "none",
@@ -226,7 +226,7 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 	};
 
 	TRY(encode(client_info.output_buffer, setup));
-	TRY(encode(client_info.output_buffer, "banan!!!"_sv));
+	TRY(encode(client_info.output_buffer, "_xbanan_"_sv));
 	TRY(encode(client_info.output_buffer, BAN::ConstByteSpan::from(g_formats)));
 	TRY(encode(client_info.output_buffer, g_root));
 	TRY(encode(client_info.output_buffer, g_depth));
@@ -250,17 +250,6 @@ static bool is_visible(WINDOW wid)
 		return false;
 
 	return is_visible(window.parent);
-}
-
-static Object::Cursor& get_cursor_safe(CURSOR cid)
-{
-	static Object::Cursor dummy {};
-	auto it = g_objects.find(cid);
-	if (it == g_objects.end())
-		return dummy;
-	if (it->value->type != Object::Type::Cursor)
-		return dummy;
-	return it->value->object.get<Object::Cursor>();
 }
 
 static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info, WINDOW wid, bool visible)
@@ -325,8 +314,8 @@ static void invalidate_window_recursive(WINDOW wid, int32_t x, int32_t y, int32_
 		const auto child_x = x - child_window.x;
 		const auto child_y = y - child_window.y;
 
-		const auto child_w = BAN::Math::min<int32_t>(w - child_window.x, child_window.texture().width() - child_x);
-		const auto child_h = BAN::Math::min<int32_t>(h - child_window.y, child_window.texture().height() - child_y);
+		const auto child_w = BAN::Math::min<int32_t>(w - child_window.x, child_window.width  - child_x);
+		const auto child_h = BAN::Math::min<int32_t>(h - child_window.y, child_window.height - child_y);
 
 		invalidate_window_recursive(
 			child_wid,
@@ -335,22 +324,48 @@ static void invalidate_window_recursive(WINDOW wid, int32_t x, int32_t y, int32_
 		);
 	}
 
-	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+	if (window.platform_window || window.c_class == InputOnly)
 		return;
 
 	auto& parent_object = *g_objects[window.parent];
 	ASSERT(parent_object.type == Object::Type::Window);
 
 	auto& parent_window = parent_object.object.get<Object::Window>();
-	parent_window.texture().copy_texture(
-		window.texture(),
-		window.x + x,
-		window.y + y,
-		x,
-		y,
-		w,
-		h
-	);
+
+	const uint32_t* child_pix = window.pixels.data();
+	const int32_t child_w = window.width;
+	const int32_t child_h = window.height;
+
+	uint32_t* parent_pix = parent_window.pixels.data();
+	const int32_t parent_w = parent_window.width;
+	const int32_t parent_h = parent_window.height;
+
+	// FIXME: optimize this
+	for (int32_t y_off = 0; y_off < h; y_off++)
+	{
+		const int32_t child_y = y + y_off;
+		if (child_y < 0 || child_y >= child_h)
+			continue;
+
+		const int32_t parent_y = window.y + y + y_off;
+		if (parent_y < 0 || parent_y >= parent_h)
+			continue;
+
+		for (int32_t x_off = 0; x_off < w; x_off++)
+		{
+			const int32_t child_x = x + x_off;
+			if (child_x < 0 || child_x >= child_w)
+				continue;
+
+			const int32_t parent_x = window.x + x + x_off;
+			if (parent_x < 0 || parent_x >= parent_w)
+				continue;
+
+			const uint32_t color = child_pix[child_y * child_w + child_x];
+			if (color != COLOR_INVISIBLE)
+				parent_pix[parent_y * parent_w + parent_x] = color;
+		}
+	}
 }
 
 void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
@@ -365,7 +380,7 @@ void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 		auto& window = object.object.get<Object::Window>();
 		if (!window.mapped)
 			return;
-		if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+		if (window.platform_window)
 			break;
 
 		x += window.x;
@@ -373,34 +388,61 @@ void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 		wid = window.parent;
 	}
 
-	invalidate_window_recursive(wid, x, y, w, h);
-
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
-	ASSERT(window.window.has<BAN::UniqPtr<LibGUI::Window>>());
+	ASSERT(window.platform_window);
 
-	auto& texture = window.texture();
+	invalidate_window_recursive(wid, x, y, w, h);
+
 	const auto min_x = BAN::Math::max<int32_t>(x, 0);
 	const auto min_y = BAN::Math::max<int32_t>(y, 0);
-	const auto max_x = BAN::Math::min<int32_t>(x + w, texture.width());
-	const auto max_y = BAN::Math::min<int32_t>(y + h, texture.height());
+	const auto max_x = BAN::Math::min<int32_t>(x + w, window.width);
+	const auto max_y = BAN::Math::min<int32_t>(y + h, window.height);
 
-	uint32_t* pixels = texture.pixels().data();
+	if (min_x >= max_x || min_y >= max_y)
+		return;
+
+	uint32_t* pixels = window.pixels.data();
 	for (auto y = min_y; y < max_y; y++)
 	{
 		for (auto x = min_x; x < max_x; x++)
 		{
-			auto& pixel = pixels[y * texture.width() + x];
-			if (pixel == LibGUI::Texture::color_invisible)
+			auto& pixel = pixels[y * window.width + x];
+			if (pixel == COLOR_INVISIBLE)
 				pixel = 0x00000000;
 			else
 				pixel |= 0xFF000000;
 		}
 	}
 
-	window.window.get<BAN::UniqPtr<LibGUI::Window>>()->invalidate(min_x, min_y, max_x - min_x, max_y - min_y);
+	g_platform_ops.invalidate(window.platform_window.ptr(), window.pixels.data(), min_x, min_y, max_x - min_x, max_y - min_y);
+}
+
+void send_exposure_recursive(WINDOW wid)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+
+	auto& window = object.object.get<Object::Window>();
+	if (!window.mapped)
+		return;
+
+	for (auto child_wid : window.children)
+		send_exposure_recursive(child_wid);
+
+	xEvent event = { .u = {
+		.expose = {
+			.window = wid,
+			.x = 0,
+			.y = 0,
+			.width = static_cast<CARD16>(window.width),
+			.height = static_cast<CARD16>(window.height),
+		}
+	}};
+	event.u.u.type = Expose;
+	MUST(window.send_event(event, ExposureMask));
 }
 
 static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
@@ -412,23 +454,17 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 	if (window.mapped)
 		return {};
 
-	auto& texture = window.texture();
-	texture.clear();
+	if (window.parent == g_root.windowId)
+	{
+		ASSERT(!window.platform_window);
+		window.platform_window = TRY(g_platform_ops.create_window(wid, window.width, window.height));
+	}
 
 	window.mapped = true;
 
-	invalidate_window(wid, 0, 0, texture.width(), texture.height());
-
-	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
-	{
-		auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
-		auto attributes = gui_window->get_attributes();
-		attributes.shown = true;
-		gui_window->set_attributes(attributes);
-
-		gui_window->texture().clear();
-		gui_window->invalidate();
-	}
+	for (auto& pixel : window.pixels)
+		pixel = window.background;
+	invalidate_window(wid, 0, 0, window.width, window.height);
 
 	{
 		xEvent event = { .u = {
@@ -467,8 +503,8 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 				.window = wid,
 				.x = 0,
 				.y = 0,
-				.width = static_cast<CARD16>(texture.width()),
-				.height = static_cast<CARD16>(texture.height()),
+				.width = static_cast<CARD16>(window.width),
+				.height = static_cast<CARD16>(window.height),
 			}
 		}};
 		event.u.u.type = Expose;
@@ -489,13 +525,8 @@ static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
 
 	window.mapped = false;
 
-	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
-	{
-		auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
-		auto attributes = gui_window->get_attributes();
-		attributes.shown = false;
-		gui_window->set_attributes(attributes);
-	}
+	if (window.platform_window)
+		window.platform_window.clear();
 
 	if (is_visible(window.parent))
 		TRY(send_visibility_events_recursively(client_info, wid, false));
@@ -531,7 +562,7 @@ static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
 	return {};
 }
 
-static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
+BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 {
 	TRY(unmap_window(client_info, wid));
 
@@ -577,39 +608,20 @@ static BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid)
 		break;
 	}
 
-	if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
-	{
-		const auto server_fd = window.window.get<BAN::UniqPtr<LibGUI::Window>>()->server_fd();
-		epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, server_fd, nullptr);
-		g_epoll_thingies.remove(server_fd);
-	}
-
 	client_info.objects.remove(wid);
 	g_objects.remove(wid);
 
 	return {};
 }
 
-static WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y)
+WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y)
 {
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 
 	auto& window = object.object.get<Object::Window>();
 
-	uint32_t width, height;
-	if (wid == g_root.windowId)
-	{
-		width = g_root.pixWidth;
-		height = g_root.pixHeight;
-	}
-	else
-	{
-		auto& texture = window.texture();
-		width = texture.width();
-		height = texture.height();
-	}
-	if (x < 0 || y < 0 || x >= width || y >= height)
+	if (x < 0 || y < 0 || x >= window.width || y >= window.height)
 		return None;
 
 	for (auto child_wid : window.children)
@@ -630,562 +642,11 @@ static WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y)
 	return wid;
 }
 
-static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
-{
-	BAN::Vector<WINDOW> result;
-
-	const auto window_contains =
-		[](const Object::Window& window, int32_t x, int32_t y) -> bool
-		{
-			const auto& texture = window.texture();
-			return x >= 0 && y >= 0 && x < texture.width() && y < texture.height();
-		};
-
-	for (;;)
-	{
-		const auto& object = *g_objects[wid];
-		ASSERT(object.type == Object::Type::Window);
-
-		const auto& window = object.object.get<Object::Window>();
-		if (!window_contains(window, x, y))
-			break;
-
-		MUST(result.push_back(wid));
-
-		const WINDOW old_wid = wid;
-		for (auto child_wid : window.children)
-		{
-			const auto& child_object = *g_objects[child_wid];
-			ASSERT(child_object.type == Object::Type::Window);
-
-			const auto& child_window = child_object.object.get<Object::Window>();
-			if (!window_contains(child_window, x - child_window.x, y - child_window.y))
-				continue;
-			wid = child_wid;
-			break;
-		}
-
-		if (old_wid == wid)
-			break;
-	}
-
-	return result;
-}
-
-static void send_enter_and_leave_events(WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
-{
-	// FIXME: correct event_x and event_y values in events
-
-	const auto old_child_path = get_path_to_child(wid, old_x, old_y);
-	const auto new_child_path = get_path_to_child(wid, new_x, new_y);
-
-	size_t common_ancestors = 0;
-	while (common_ancestors < old_child_path.size() && common_ancestors < new_child_path.size())
-	{
-		if (old_child_path[common_ancestors] != new_child_path[common_ancestors])
-			break;
-		common_ancestors++;
-	}
-
-	if (old_child_path.size() == common_ancestors && new_child_path.size() == common_ancestors)
-		return;
-
-	const bool linear = (common_ancestors == old_child_path.size() || common_ancestors == new_child_path.size());
-
-	const auto get_flags =
-		[](WINDOW wid) -> BYTE
-		{
-			return ELFlagSameScreen | (s_focus_window == wid ? ELFlagFocus : 0);
-		};
-
-	size_t leave_events = old_child_path.size() - common_ancestors;
-	if (linear && common_ancestors && old_child_path.size() < new_child_path.size())
-		leave_events++;
-
-	size_t enter_events = new_child_path.size() - common_ancestors;
-	if (linear && common_ancestors && new_child_path.size() < old_child_path.size())
-		enter_events++;
-
-	for (size_t i = 0; i < leave_events; i++)
-	{
-		const bool first = (i == 0);
-		const BYTE detail =
-			[&]() -> BYTE {
-				if (!linear)
-					return first ? NotifyNonlinear : NotifyNonlinearVirtual;
-				if (!first)
-					return NotifyVirtual;
-				return (old_child_path.size() > new_child_path.size())
-					? NotifyAncestor
-					: NotifyInferior;
-			}();
-
-		const auto& wid = old_child_path[old_child_path.size() - i - 1];
-
-		auto& object = *g_objects[wid];
-		ASSERT(object.type == Object::Type::Window);
-		auto& window = object.object.get<Object::Window>();
-
-		xEvent event { .u = {
-			.enterLeave = {
-				.time = static_cast<CARD32>(time(nullptr)),
-				.root = g_root.windowId,
-				.event = wid,
-				.child = first ? static_cast<WINDOW>(None) : old_child_path.back(),
-				.rootX = static_cast<INT16>(old_x),
-				.rootY = static_cast<INT16>(old_y),
-				.eventX = static_cast<INT16>(old_x),
-				.eventY = static_cast<INT16>(old_y),
-				.state = static_cast<KeyButMask>(s_keymask | s_butmask),
-				.mode = NotifyNormal,
-				.flags = get_flags(wid),
-			}
-		}};
-		event.u.u.type = LeaveNotify,
-		event.u.u.detail = detail;
-		MUST(window.send_event(event, LeaveWindowMask));
-	}
-
-	for (size_t i = 0; i < enter_events; i++)
-	{
-		const bool last = (i == enter_events - 1);
-		const BYTE detail =
-			[&]() -> BYTE {
-				if (!linear)
-					return last ? NotifyNonlinear : NotifyNonlinearVirtual;
-				if (!last)
-					return NotifyVirtual;
-				return (old_child_path.size() > new_child_path.size())
-					? NotifyInferior
-					: NotifyAncestor;
-			}();
-
-		const auto& wid = new_child_path[new_child_path.size() - enter_events + i];
-
-		auto& object = *g_objects[wid];
-		ASSERT(object.type == Object::Type::Window);
-		auto& window = object.object.get<Object::Window>();
-
-		xEvent event { .u = {
-			.enterLeave = {
-				.time = static_cast<CARD32>(time(nullptr)),
-				.root = g_root.windowId,
-				.event = wid,
-				.child = last ? static_cast<WINDOW>(None) : new_child_path.back(),
-				.rootX = static_cast<INT16>(new_x),
-				.rootY = static_cast<INT16>(new_y),
-				.eventX = static_cast<INT16>(new_x),
-				.eventY = static_cast<INT16>(new_y),
-				.state = static_cast<KeyButMask>(s_keymask | s_butmask),
-				.mode = NotifyNormal,
-				.flags = get_flags(wid),
-			}
-		}};
-		event.u.u.type = EnterNotify,
-		event.u.u.detail = detail;
-		MUST(window.send_event(event, EnterWindowMask));
-	}
-}
-
-static void send_exposure_recursive(WINDOW wid)
-{
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-
-	auto& window = object.object.get<Object::Window>();
-	if (!window.mapped)
-		return;
-
-	for (auto child_wid : window.children)
-		send_exposure_recursive(child_wid);
-
-	window.texture().clear();
-
-	xEvent event = { .u = {
-		.expose = {
-			.window = wid,
-			.x = 0,
-			.y = 0,
-			.width = static_cast<CARD16>(window.texture().width()),
-			.height = static_cast<CARD16>(window.texture().height()),
-		}
-	}};
-	event.u.u.type = Expose;
-	MUST(window.send_event(event, ExposureMask));
-}
-
-static void on_window_close_event(Client& client_info, WINDOW wid)
-{
-	static CARD32 WM_PROTOCOLS     = g_atoms_name_to_id["WM_PROTOCOLS"_sv];
-	static CARD32 WM_DELETE_WINDOW = g_atoms_name_to_id["WM_DELETE_WINDOW"_sv];
-
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-	auto& window = object.object.get<Object::Window>();
-
-	const bool supports_wm_delete_winow =
-		[&window]
-		{
-			auto wm_protocols_it = window.properties.find(WM_PROTOCOLS);
-			if (wm_protocols_it == window.properties.end())
-				return false;
-
-			const auto& wm_protocols = wm_protocols_it->value;
-			if (wm_protocols.type != XA_ATOM || wm_protocols.format != 32)
-				return false;
-
-			const auto atoms = BAN::ConstByteSpan(wm_protocols.data.span()).as_span<const CARD32>();
-			for (auto atom : atoms)
-				if (atom == WM_DELETE_WINDOW)
-					return true;
-
-			return false;
-		}();
-
-	if (!supports_wm_delete_winow)
-		MUST(destroy_window(client_info, wid));
-	else
-	{
-		xEvent event { .u = {
-			.clientMessage = {
-				.window = wid,
-				.u = { .l = {
-					.type = WM_PROTOCOLS,
-					.longs0 = static_cast<INT32>(WM_DELETE_WINDOW),
-					.longs1 = static_cast<INT32>(time(nullptr)),
-				}}
-			}
-		}};
-		event.u.u.type = ClientMessage;
-		event.u.u.detail = 32;
-		event.u.u.sequenceNumber = client_info.sequence;
-		MUST(encode(client_info.output_buffer, event));
-	}
-}
-
-static void on_window_resize_event(WINDOW wid)
-{
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-	auto& window = object.object.get<Object::Window>();
-
-	{
-		xEvent event = { .u = {
-			.configureNotify = {
-				.event = wid,
-				.window = wid,
-				.aboveSibling = xFalse,
-				.x = static_cast<INT16>(window.x),
-				.y = static_cast<INT16>(window.y),
-				.width = static_cast<CARD16>(window.texture().width()),
-				.height = static_cast<CARD16>(window.texture().height()),
-				.borderWidth = 0,
-				.override = xFalse,
-			}
-		}};
-		event.u.u.type = ConfigureNotify;
-		MUST(window.send_event(event, StructureNotifyMask));
-	}
-
-	auto& parent_object = *g_objects[window.parent];
-	ASSERT(parent_object.type == Object::Type::Window);
-	auto& parent_window = parent_object.object.get<Object::Window>();
-
-	{
-		xEvent event = { .u = {
-			.configureNotify = {
-				.event = window.parent,
-				.window = wid,
-				.aboveSibling = xFalse,
-				.x = static_cast<INT16>(window.x),
-				.y = static_cast<INT16>(window.y),
-				.width = static_cast<CARD16>(window.texture().width()),
-				.height = static_cast<CARD16>(window.texture().height()),
-				.borderWidth = 0,
-				.override = xFalse,
-			}
-		}};
-		event.u.u.type = ConfigureNotify;
-		MUST(parent_window.send_event(event, SubstructureNotifyMask));
-	}
-
-	send_exposure_recursive(wid);
-
-	invalidate_window(wid, 0, 0, window.texture().width(), window.texture().height());
-}
-
-static void on_window_focus_event(WINDOW wid, bool focused)
-{
-	if (focused)
-		s_focus_window = wid;
-
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-
-	auto& window = object.object.get<Object::Window>();
-	if (window.focused == focused)
-		return;
-
-	window.focused = focused;
-
-	// FIXME: handle childs
-
-	xEvent event { .u = {
-		.focus = {
-			.window = wid,
-			.mode = NotifyNormal,
-		}
-	}};
-	event.u.u.type = focused ? FocusIn : FocusOut,
-	event.u.u.detail = NotifyNonlinear;
-	MUST(window.send_event(event, FocusChangeMask));
-}
-
-static void send_key_button_pointer_event(WINDOW root_wid, BYTE detail, uint32_t event_mask, BYTE event_type, KeyButMask state)
-{
-	int32_t root_x, root_y;
-	int32_t event_x, event_y;
-
-	{
-		auto& object = *g_objects[root_wid];
-		ASSERT(object.type == Object::Type::Window);
-		auto& window = object.object.get<Object::Window>();
-		root_x = event_x = window.cursor_x;
-		root_y = event_y = window.cursor_y;
-	}
-
-	const auto child_wid = find_child_window(root_wid, event_x, event_y);
-
-	auto wid = child_wid;
-	while (wid != None)
-	{
-		auto& object = *g_objects[wid];
-		ASSERT(object.type == Object::Type::Window);
-		auto& window = object.object.get<Object::Window>();
-		if (window.full_event_mask() & event_mask)
-			break;
-
-		event_x += window.x;
-		event_y += window.y;
-		wid = window.parent;
-	}
-
-	if (wid == None)
-	{
-		if (event_type == MotionNotify && s_butmask == 0)
-			return;
-		wid = root_wid;
-	}
-
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-	auto& window = object.object.get<Object::Window>();
-
-	xEvent event { .u = {
-		.keyButtonPointer = {
-			.time = static_cast<CARD32>(time(nullptr)),
-			.root = g_root.windowId,
-			.event = wid,
-			.child = static_cast<CARD32>(child_wid == wid ? None : child_wid),
-			.rootX = static_cast<INT16>(root_x),
-			.rootY = static_cast<INT16>(root_y),
-			.eventX = static_cast<INT16>(event_x),
-			.eventY = static_cast<INT16>(event_y),
-			.state = state,
-			.sameScreen = xTrue,
-		}
-	}};
-	event.u.u.type = event_type,
-	event.u.u.detail = detail;
-	MUST(window.send_event(event, event_mask));
-}
-
-static void update_cursor_position_recursive(WINDOW wid, int32_t new_x, int32_t new_y)
-{
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-	auto& window = object.object.get<Object::Window>();
-
-	window.cursor_x = new_x;
-	window.cursor_y = new_y;
-
-	for (auto child_wid : window.children)
-	{
-		auto& child_object = *g_objects[child_wid];
-		ASSERT(child_object.type == Object::Type::Window);
-		auto& child_window = child_object.object.get<Object::Window>();
-		update_cursor_position_recursive(child_wid, new_x - child_window.x, new_y - child_window.y);
-	}
-}
-
-static void update_cursor(WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
-{
-	const auto old_wid = find_child_window(wid, old_x, old_y);
-	const auto new_wid = find_child_window(wid, new_x, new_y);
-	if (old_wid == new_wid || old_wid == None || new_wid == None)
-		return;
-
-	const auto& old_window = g_objects[old_wid]->object.get<Object::Window>();
-	const auto& new_window = g_objects[new_wid]->object.get<Object::Window>();
-	if (old_window.cursor == new_window.cursor)
-		return;
-
-	auto& window = g_objects[wid]->object.get<Object::Window>();
-	auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
-
-	const auto& cursor = get_cursor_safe(window.cursor);
-	gui_window->set_cursor(cursor.width, cursor.height, cursor.pixels.span(), cursor.origin_x, cursor.origin_y);
-}
-
-static void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
-{
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-	auto& window = object.object.get<Object::Window>();
-
-	update_cursor(wid, window.cursor_x, window.cursor_y, x, y);
-
-	send_enter_and_leave_events(wid, window.cursor_x, window.cursor_y, x, y);
-
-	update_cursor_position_recursive(wid, x, y);
-
-	// TODO: optimize with PointerMotionHint
-	uint32_t event_mask = PointerMotionMask | PointerMotionHintMask;
-	if (s_butmask) event_mask |= ButtonMotionMask;
-	if (s_butmask & Button1Mask) event_mask |= Button1MotionMask;
-	if (s_butmask & Button2Mask) event_mask |= Button2MotionMask;
-	if (s_butmask & Button3Mask) event_mask |= Button3MotionMask;
-	if (s_butmask & Button4Mask) event_mask |= Button4MotionMask;
-	if (s_butmask & Button5Mask) event_mask |= Button5MotionMask;
-	send_key_button_pointer_event(wid, NotifyNormal, event_mask, MotionNotify, s_keymask | s_butmask);
-}
-
-static void on_mouse_button_event(WINDOW wid, uint8_t xbutton, bool pressed)
-{
-	uint16_t mask = 0;
-	switch (xbutton)
-	{
-		case Button1: mask = Button1Mask; break;
-		case Button2: mask = Button2Mask; break;
-		case Button3: mask = Button3Mask; break;
-		case Button4: mask = Button4Mask; break;
-		case Button5: mask = Button5Mask; break;
-	}
-
-	const auto state = s_keymask | s_butmask;
-
-	if (pressed)
-		s_butmask |= mask;
-	else
-		s_butmask &= ~mask;
-
-	send_key_button_pointer_event(
-		wid,
-		xbutton,
-		pressed ? ButtonPressMask : ButtonReleaseMask,
-		pressed ? ButtonPress     : ButtonRelease,
-		state
-	);
-}
-
-static void on_key_event(WINDOW wid, LibGUI::EventPacket::KeyEvent::event_t event)
-{
-	const uint8_t xkeycode = event.scancode + g_keymap_min_keycode;
-	if (xkeycode < g_keymap_min_keycode)
-	{
-		dwarnln("cannot send keycode {}", xkeycode);
-		return;
-	}
-
-	{
-		const uint8_t byte = xkeycode / 8;
-		const uint8_t bit = xkeycode % 8;
-		if (event.pressed())
-			s_pressed_keys[byte] |= 1 << bit;
-		else
-			s_pressed_keys[byte] &= ~(1 << bit);
-	}
-
-	const auto state = s_keymask | s_butmask;
-
-	s_keymask = 0;
-	if (event.shift())
-		s_keymask |= ShiftMask;
-	if (event.caps_lock())
-		s_keymask |= LockMask;
-	if (event.ctrl())
-		s_keymask |= ControlMask;
-	if (event.alt())
-		s_keymask |= Mod1Mask;
-
-	send_key_button_pointer_event(
-		wid,
-		xkeycode,
-		event.pressed() ? KeyPressMask : KeyReleaseMask,
-		event.pressed() ? KeyPress     : KeyRelease,
-		state
-	);
-}
-
-static void on_window_fullscreen_event(WINDOW wid, bool is_fullscreen)
-{
-	static CARD32 _NET_WM_STATE            = g_atoms_name_to_id["_NET_WM_STATE"_sv];
-	static CARD32 _NET_WM_STATE_FULLSCREEN = g_atoms_name_to_id["_NET_WM_STATE_FULLSCREEN"_sv];
-
-	auto window_it = g_objects.find(wid);
-	if (window_it == g_objects.end() || window_it->value->type != Object::Type::Window)
-		return;
-
-	auto& window = window_it->value->object.get<Object::Window>();
-
-	window.fullscreen = is_fullscreen;
-
-	auto it = window.properties.find(_NET_WM_STATE);
-	if (it == window.properties.end())
-		it = MUST(window.properties.emplace(_NET_WM_STATE));
-
-	auto& _net_wm_state = it->value;
-	if (_net_wm_state.type != XA_ATOM || _net_wm_state.format != 32)
-		_net_wm_state = {};
-
-	_net_wm_state.type = XA_ATOM;
-	_net_wm_state.format = 32;
-
-	for (size_t i = 0; i + 4 <= _net_wm_state.data.size(); i += 4)
-	{
-		const auto atom = *reinterpret_cast<const CARD32*>(_net_wm_state.data.data() + i);
-		if (atom != _NET_WM_STATE_FULLSCREEN)
-			continue;
-		_net_wm_state.data.remove(i);
-		_net_wm_state.data.remove(i);
-		_net_wm_state.data.remove(i);
-		_net_wm_state.data.remove(i);
-		i -= 4;
-	}
-
-	if (is_fullscreen)
-	{
-		const size_t atom_count = _net_wm_state.data.size() / 4;
-		MUST(_net_wm_state.data.resize(_net_wm_state.data.size() + 4));
-		reinterpret_cast<CARD32*>(_net_wm_state.data.data())[atom_count] = _NET_WM_STATE_FULLSCREEN;
-	}
-
-	xEvent event = { .u = {
-		.property = {
-			.window = wid,
-			.atom = _NET_WM_STATE,
-			.time = static_cast<CARD32>(time(nullptr)),
-			.state = PropertyNewValue,
-		}
-	}};
-	event.u.u.type = PropertyNotify;
-	MUST(window.send_event(event, PropertyChangeMask));
-}
 
 static void on_root_client_message(const xEvent& event)
 {
-	static CARD32 _NET_WM_STATE            = g_atoms_name_to_id["_NET_WM_STATE"_sv];
-	static CARD32 _NET_WM_STATE_FULLSCREEN = g_atoms_name_to_id["_NET_WM_STATE_FULLSCREEN"_sv];
+	static const CARD32 _NET_WM_STATE            = g_atoms_name_to_id["_NET_WM_STATE"_sv];
+	static const CARD32 _NET_WM_STATE_FULLSCREEN = g_atoms_name_to_id["_NET_WM_STATE_FULLSCREEN"_sv];
 
 	ASSERT(event.u.u.type == ClientMessage);
 
@@ -1200,22 +661,20 @@ static void on_root_client_message(const xEvent& event)
 		return;
 
 	auto& window = window_it->value->object.get<Object::Window>();
-	if (!window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+	if (!window.platform_window)
 		return;
 
-	auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
+	bool want_fullscren;
 	switch (action)
 	{
-		case 0:
-			gui_window->set_fullscreen(false);
-			break;
-		case 1:
-			gui_window->set_fullscreen(true);
-			break;
-		case 2:
-			gui_window->set_fullscreen(!window.fullscreen);
-			break;
+		case 0: want_fullscren = false;              break;
+		case 1: want_fullscren = true;               break;
+		case 2: want_fullscren = !window.fullscreen; break;
+		default: return;
 	}
+
+	if (g_platform_ops.request_fullscreen)
+		g_platform_ops.request_fullscreen(window.platform_window.ptr(), want_fullscren);
 }
 
 BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
@@ -1327,7 +786,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 0:
 						dprintln("    background-pixmap: {8h}", value);
 						if (value == None || value == ParentRelative)
-							background = LibGUI::Texture::color_invisible;
+							background = COLOR_INVISIBLE;
 						break;
 					case 1:
 						dprintln("    background-pixel: {8h}", value);
@@ -1347,100 +806,33 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}
 			}
 
-			decltype(Object::Window::window) window;
+			Object::Window window {
+				.owner = client_info,
+				.depth = request.depth,
+				.x = request.x,
+				.y = request.y,
+				.parent = request.parent,
+				.cursor = cursor_id,
+				.c_class = request.c_class,
+				.width = request.width,
+				.height = request.height,
+				.background = background,
+			};
 
-			LibGUI::Window* gui_window_ptr = nullptr;
-
-			if (request.parent != g_root.windowId)
-				window = TRY(LibGUI::Texture::create(request.width, request.height, background));
-			else
-			{
-				auto attributes = LibGUI::Window::default_attributes;
-				attributes.shown = false;
-				attributes.title_bar = false;
-				attributes.resizable = true;
-
-				auto gui_window = TRY(LibGUI::Window::create(request.width, request.height, "window?"_sv, attributes));
-				gui_window->texture().set_bg_color(background);
-				gui_window_ptr = gui_window.ptr();
-
-				if (cursor_id != None)
-				{
-					const auto& cursor = get_cursor_safe(cursor_id);
-					gui_window->set_cursor(cursor.width, cursor.height, cursor.pixels.span(), cursor.origin_x, cursor.origin_y);
-				}
-
-				TRY(g_epoll_thingies.insert(gui_window->server_fd(), {
-					.type = EpollThingy::Type::Window,
-					.value = gui_window.ptr(),
-				}));
-
-				epoll_event event { .events = EPOLLIN, .data = { .fd = gui_window->server_fd() } };
-				ASSERT(epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, gui_window->server_fd(), &event) == 0);
-
-				window = BAN::move(gui_window);
-			}
+			TRY(window.pixels.resize(window.width * window.height, window.background));
 
 			TRY(client_info.objects.insert(request.wid));
 			auto object_it = TRY(g_objects.insert(
 				request.wid,
 				TRY(BAN::UniqPtr<Object>::create(Object {
 					.type = Object::Type::Window,
-					.object = Object::Window {
-						.depth = request.depth,
-						.x = request.x,
-						.y = request.y,
-						.parent = request.parent,
-						.cursor = cursor_id,
-						.c_class = request.c_class,
-						.window = BAN::move(window),
-					},
+					.object = BAN::move(window),
 				}))
 			));
 			if (event_mask != 0)
 				TRY(object_it->value->object.get<Object::Window>().event_masks.insert(&client_info, event_mask));
 
 			TRY(parent_window.children.push_back(request.wid));
-
-			if (gui_window_ptr)
-			{
-				const WINDOW wid = request.wid;
-				gui_window_ptr->set_close_window_event_callback([&client_info, wid] {
-					on_window_close_event(client_info, wid);
-				});
-				gui_window_ptr->set_resize_window_event_callback([wid]() {
-					on_window_resize_event(wid);
-				});
-				gui_window_ptr->set_window_focus_event_callback([wid](auto event) {
-					on_window_focus_event(wid, event.focused);
-				});
-				gui_window_ptr->set_window_fullscreen_event_callback([wid](auto event) {
-					on_window_fullscreen_event(wid, event.fullscreen);
-				});
-				gui_window_ptr->set_mouse_move_event_callback([wid](auto event) {
-					on_mouse_move_event(wid, event.x, event.y);
-				});
-				gui_window_ptr->set_mouse_button_event_callback([wid](auto event) {
-					uint8_t xbutton = 0;
-					switch (event.button)
-					{
-						case LibInput::MouseButton::Left:   xbutton = 1; break;
-						case LibInput::MouseButton::Middle: xbutton = 2; break;
-						case LibInput::MouseButton::Right:  xbutton = 3; break;
-						case LibInput::MouseButton::Extra1: xbutton = 8; break;
-						case LibInput::MouseButton::Extra2: xbutton = 9; break;
-					}
-					if (xbutton)
-						on_mouse_button_event(wid, xbutton, event.pressed);
-				});
-				gui_window_ptr->set_mouse_scroll_event_callback([wid](auto event) {
-					on_mouse_button_event(wid, event.scroll > 0 ? 4 : 5, true);
-					on_mouse_button_event(wid, event.scroll > 0 ? 4 : 5, false);
-				});
-				gui_window_ptr->set_key_event_callback([wid](auto event) {
-					on_key_event(wid, event);
-				});
-			}
 
 			xEvent event = { .u = {
 				.createNotify = {
@@ -1483,7 +875,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					case 0:
 						dprintln("    background-pixmap: {8h}", value);
 						if (value == None || value == ParentRelative)
-							background = LibGUI::Texture::color_invisible;
+							background = COLOR_INVISIBLE;
 						break;
 					case 1:
 						dprintln("    background-pixel: {8h}", value);
@@ -1510,19 +902,25 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			{
 				// FIXME: show cursor if wid is hovered
 
-				if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+				if (window.platform_window)
 				{
-					auto& gui_window = window.window.get<BAN::UniqPtr<LibGUI::Window>>();
-
-					const auto& cursor = get_cursor_safe(cursor_id);
-					gui_window->set_cursor(cursor.width, cursor.height, cursor.pixels.span(), cursor.origin_x, cursor.origin_y);
+					if (g_platform_ops.set_cursor)
+					{
+						const auto& cursor = get_cursor_safe(cursor_id);
+						g_platform_ops.set_cursor(
+							window.platform_window.ptr(),
+							cursor.pixels.data(),
+							cursor.width, cursor.height,
+							cursor.origin_x, cursor.origin_y
+						);
+					}
 				}
 
 				window.cursor = cursor_id;
 			}
 
 			if (background.has_value())
-				window.texture().set_bg_color(background.value());
+				window.background = background.value();
 
 			break;
 		}
@@ -1704,12 +1102,11 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  window: {}", request.window);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
-			auto& texture = window.texture();
 
 			int32_t new_x = window.x;
 			int32_t new_y = window.y;
-			uint32_t new_width = texture.width();
-			uint32_t new_height = texture.height();
+			uint32_t new_width = window.width;
+			uint32_t new_height = window.height;
 
 			dprintln("  mask:");
 			for (size_t i = 0; i < 7; i++)
@@ -1743,8 +1140,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			const int32_t min_x = BAN::Math::min(window.x, new_x);
 			const int32_t min_y = BAN::Math::min(window.y, new_y);
-			const int32_t max_x = BAN::Math::max(window.x + texture.width(), new_x + new_width);
-			const int32_t max_y = BAN::Math::max(window.y + texture.height(), new_y + new_height);
+			const int32_t max_x = BAN::Math::max(window.x + window.width, new_x + new_width);
+			const int32_t max_y = BAN::Math::max(window.y + window.height, new_y + new_height);
 
 			if (new_x != window.x || new_y != window.y)
 			{
@@ -1753,24 +1150,29 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				window_changed = true;
 			}
 
-			if (new_width != texture.width() || new_height != texture.height())
+			if (new_width != window.width || new_height != window.height)
 			{
-				if (window.window.has<BAN::UniqPtr<LibGUI::Window>>())
+				if (window.platform_window)
 				{
-					window.window.get<BAN::UniqPtr<LibGUI::Window>>()->request_resize(new_width, new_height);
+					if (g_platform_ops.request_resize)
+						g_platform_ops.request_resize(window.platform_window.ptr(), new_width, new_height);
 					window_changed = false;
 				}
 				else
 				{
-					TRY(window.window.get<LibGUI::Texture>().resize(new_width, new_height));
+					window.width  = new_width;
+					window.height = new_height;
+
+					TRY(window.pixels.resize(new_width * new_height));
+					for (auto& pixel : window.pixels)
+						pixel = window.background;
+
 					window_changed = true;
 				}
 			}
 
 			if (!window_changed)
 				break;
-
-			invalidate_window(request.window, min_x, min_y, max_x - min_x, max_y + min_y);
 
 			{
 				xEvent event = { .u = {
@@ -1780,8 +1182,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						.aboveSibling = xFalse,
 						.x = static_cast<INT16>(window.x),
 						.y = static_cast<INT16>(window.y),
-						.width = static_cast<CARD16>(texture.width()),
-						.height = static_cast<CARD16>(texture.height()),
+						.width = static_cast<CARD16>(window.width),
+						.height = static_cast<CARD16>(window.height),
 						.borderWidth = 0,
 						.override = xFalse,
 					}
@@ -1802,8 +1204,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						.aboveSibling = xFalse,
 						.x = static_cast<INT16>(window.x),
 						.y = static_cast<INT16>(window.y),
-						.width = static_cast<CARD16>(texture.width()),
-						.height = static_cast<CARD16>(texture.height()),
+						.width = static_cast<CARD16>(window.width),
+						.height = static_cast<CARD16>(window.height),
 						.borderWidth = 0,
 						.override = xFalse,
 					}
@@ -1853,8 +1255,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			else if (drawable.type == Object::Type::Window)
 			{
 				const auto& window = drawable.object.get<Object::Window>();
-				width = window.texture().width();
-				height = window.texture().height();
+				width = window.width;
+				height = window.height;
 				depth = g_root.rootDepth;
 				x = window.x;
 				y = window.y;
@@ -1980,7 +1382,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  mode:     {}", request.mode);
 			dprintln("  window:   {}", request.window);
 			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
-			dprintln("  type:     {}", request.type);
+			dprintln("  type:     {}", g_atoms_id_to_name[request.type]);
 			dprintln("  format:   {}", request.format);
 			dprintln("  nUnits:   {}", request.nUnits);
 
@@ -2288,7 +1690,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			WINDOW wid = request.destination;
 			if (wid == PointerWindow || wid == InputFocus)
-				wid = s_focus_window;
+				wid = g_focus_window;
 
 			(void)TRY_REF(get_window(client_info, wid, X_SendEvent));
 
@@ -2453,7 +1855,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.rootY = static_cast<INT16>(root_y),
 				.winX = static_cast<INT16>(event_x),
 				.winY = static_cast<INT16>(event_y),
-				.mask = static_cast<KeyButMask>(s_keymask | s_butmask),
+				.mask = static_cast<KeyButMask>(g_keymask | g_butmask),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -2491,7 +1893,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 2,
 			};
-			memcpy(reply.map, s_pressed_keys, 32);
+			memcpy(reply.map, g_pressed_keys, 32);
 			TRY(encode(client_info.output_buffer, reply));
 
 			break;
@@ -2520,7 +1922,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.revertTo = None,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
-				.focus = s_focus_window,
+				.focus = g_focus_window,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -2776,15 +2178,25 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  height:    {}", request.height);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
-			auto& texture = window.texture();
 
 			if (request.width == 0)
-				request.width = texture.width() - request.x;
+				request.width = window.width - request.x;
 			if (request.height == 0)
-				request.height = texture.height() - request.y;
+				request.height = window.height - request.y;
 
-			texture.clear_rect(request.x, request.y, request.width, request.height);
-			invalidate_window(request.window, request.x, request.y, request.width, request.height);
+			const int32_t min_x = BAN::Math::max<int32_t>(request.x, 0);
+			const int32_t min_y = BAN::Math::max<int32_t>(request.y, 0);
+			const int32_t max_x = BAN::Math::min<int32_t>(request.x + request.width,  window.width);
+			const int32_t max_y = BAN::Math::min<int32_t>(request.y + request.height, window.height);
+
+			if (min_x >= max_x || min_y >= max_y)
+				break;
+
+			for (int32_t y = min_y; y < max_y; y++)
+				for (int32_t x = min_x; x < max_x; x++)
+					window.pixels[y * window.width + x] = window.background;
+
+			invalidate_window(request.window, min_x, min_y, max_x - min_x, max_y - min_y);
 
 			break;
 		}
@@ -2887,7 +2299,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			auto request = decode<xPutImageReq>(packet).value();
 
-#if 0
 			dprintln("PutImage");
 			dprintln("  drawable: {}", request.drawable);
 			dprintln("  gc:       {}", request.gc);
@@ -2897,8 +2308,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  dstY:     {}", request.dstY);
 			dprintln("  width:    {}", request.width);
 			dprintln("  height:   {}", request.height);
-#endif
-
 
 			auto [out_data, out_w, out_h, out_depth] = TRY(get_drawable_info(client_info, request.drawable, opcode));
 
@@ -3190,7 +2599,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			auto request = decode<xQueryBestSizeReq>(packet).value();
 
-			dprintln("FreeCursor");
+			dprintln("QueryBestSize");
 			dprintln("  class:    {}", request.c_class);
 			dprintln("  drawable: {}", request.drawable);
 			dprintln("  width:    {}", request.width);

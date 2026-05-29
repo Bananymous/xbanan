@@ -784,7 +784,7 @@ static void write_text(WriteTextInfo& info)
 					? info.gc.foreground
 					: info.gc.background;
 
-				if (color != LibGUI::Texture::color_invisible)
+				if (color != COLOR_INVISIBLE)
 					info.out_data_u32[out_y * info.out_w + out_x] = color;
 			}
 		}

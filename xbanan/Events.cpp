@@ -361,12 +361,12 @@ static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
 	return result;
 }
 
-static void send_enter_and_leave_events(WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
+static void send_enter_and_leave_events(WINDOW old_wid, int32_t old_x, int32_t old_y, WINDOW new_wid, int32_t new_x, int32_t new_y)
 {
 	// FIXME: correct event_x and event_y values in events
 
-	const auto old_child_path = get_path_to_child(wid, old_x, old_y);
-	const auto new_child_path = get_path_to_child(wid, new_x, new_y);
+	const auto old_child_path = get_path_to_child(old_wid, old_x, old_y);
+	const auto new_child_path = get_path_to_child(new_wid, new_x, new_y);
 
 	size_t common_ancestors = 0;
 	while (common_ancestors < old_child_path.size() && common_ancestors < new_child_path.size())
@@ -484,7 +484,21 @@ void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
 
 	update_cursor(wid, window.cursor_x, window.cursor_y, x, y);
 
-	send_enter_and_leave_events(wid, window.cursor_x, window.cursor_y, x, y);
+	{
+		static WINDOW old_wid = g_root.windowId;
+		auto it = g_objects.find(old_wid);
+		if (it == g_objects.end())
+		{
+			old_wid = g_root.windowId;
+			it = g_objects.find(g_root.windowId);
+		}
+
+		ASSERT(it->value->type == Object::Type::Window);
+		auto& old_window = it->value->object.get<Object::Window>();
+
+		send_enter_and_leave_events(old_wid, old_window.cursor_x, old_window.cursor_y, wid, x, y);
+		old_wid = wid;
+	}
 
 	update_cursor_position_recursive(wid, x, y);
 

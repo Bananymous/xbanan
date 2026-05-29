@@ -38,8 +38,13 @@ static void bananos_poll_events(void* window)
 	banan_window.window->poll_events();
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WINDOW wid, uint32_t width, uint32_t height)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(PlatformWindow* parent, WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
 {
+	(void)parent;
+	(void)type;
+	(void)x;
+	(void)y;
+
 	auto window = TRY(BAN::UniqPtr<BananWindow>::create());
 
 	auto attributes = LibGUI::Window::default_attributes;

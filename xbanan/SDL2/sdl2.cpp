@@ -92,26 +92,7 @@ static bool sdl2_initialize(uint32_t* display_w, uint32_t* display_h)
 	return true;
 }
 
-static bool sdl2_init_window(SDLWindow& window, uint32_t width, uint32_t height)
-{
-	window.renderer = SDL_CreateRenderer(window.window, -1, SDL_RENDERER_ACCELERATED);
-	if (window.renderer == nullptr)
-	{
-		dwarnln("Could not create SDL renderer: {}\n", SDL_GetError());
-		return false;
-	}
-
-	window.texture = SDL_CreateTexture(window.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
-	if (window.texture == nullptr)
-	{
-		dwarnln("Could not create SDL texture: {}\n", SDL_GetError());
-		return false;
-	}
-
-	return true;
-}
-
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl2_create_window(WINDOW wid, uint32_t width, uint32_t height)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl2_create_window(PlatformWindow* parent, WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
 {
 	auto window = TRY(BAN::UniqPtr<SDLWindow>::create());
 
@@ -119,16 +100,51 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl2_create_window(WINDOW wid,
 	window->width = width;
 	window->height = height;
 
-	const auto flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_UTILITY;
-	window->window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
+	if (parent == nullptr)
+		x = y = SDL_WINDOWPOS_UNDEFINED;
+	else
+	{
+		auto& sdl_parent = *static_cast<SDLWindow*>(parent);
+		int parent_x, parent_y;
+		SDL_GetWindowPosition(sdl_parent.window, &parent_x, &parent_y);
+		x += parent_x;
+		y += parent_y;
+	}
+
+	int flags;
+	switch (type)
+	{
+		case WindowType::Popup:
+			flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_SKIP_TASKBAR | SDL_WINDOW_UTILITY;
+			break;
+		case WindowType::Utility:
+			flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_UTILITY;
+			break;
+		case WindowType::Normal:
+			flags = SDL_WINDOW_RESIZABLE;
+			break;
+	}
+
+	window->window = SDL_CreateWindow("", x, y, width, height, flags);
 	if (window->window == nullptr)
 	{
 		dwarnln("Could not create SDL window: {}", SDL_GetError());
 		return BAN::Error::from_errno(EFAULT);
 	}
 
-	if (!sdl2_init_window(*window, width, height))
+	window->renderer = SDL_CreateRenderer(window->window, -1, SDL_RENDERER_ACCELERATED);
+	if (window->renderer == nullptr)
+	{
+		dwarnln("Could not create SDL renderer: {}", SDL_GetError());
 		return BAN::Error::from_errno(EFAULT);
+	}
+
+	window->texture = SDL_CreateTexture(window->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+	if (window->texture == nullptr)
+	{
+		dwarnln("Could not create SDL texture: {}", SDL_GetError());
+		return BAN::Error::from_errno(EFAULT);
+	}
 
 	TRY(s_window_map.insert(SDL_GetWindowID(window->window), window.ptr()));
 

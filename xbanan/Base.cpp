@@ -445,6 +445,65 @@ void send_exposure_recursive(WINDOW wid)
 	MUST(window.send_event(event, ExposureMask));
 }
 
+struct PlatformWindowInfo
+{
+	PlatformWindow* transient_for;
+	WindowType type;
+};
+
+static PlatformWindowInfo get_plaform_window_info(const Object::Window& window)
+{
+	static const CARD32 ATOM                              = g_atoms_name_to_id["ATOM"_sv];
+	static const CARD32 WINDOW                            = g_atoms_name_to_id["WINDOW"_sv];
+	static const CARD32 WM_TRANSIENT_FOR                  = g_atoms_name_to_id["WM_TRANSIENT_FOR"_sv];
+	static const CARD32 _NET_WM_WINDOW_TYPE               = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE"_sv];
+	static const CARD32 _NET_WM_WINDOW_TYPE_DIALOG        = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_DIALOG"_sv];
+	static const CARD32 _NET_WM_WINDOW_TYPE_NORMAL        = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_NORMAL"_sv];
+	static const CARD32 _NET_WM_WINDOW_TYPE_SPLASH        = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_SPLASH"_sv];
+	static const CARD32 _NET_WM_WINDOW_TYPE_UTILITY       = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_UTILITY"_sv];
+
+	PlatformWindowInfo info {
+		.transient_for = nullptr,
+		.type = WindowType::Normal,
+	};
+
+	if (auto it = window.properties.find(_NET_WM_WINDOW_TYPE); it != window.properties.end())
+	{
+		if (it->value.type != ATOM || it->value.data.size() != sizeof(CARD32))
+			goto wm_window_type_done;
+
+		const CARD32 type = *reinterpret_cast<const CARD32*>(it->value.data.data());
+		if (type == _NET_WM_WINDOW_TYPE_NORMAL)
+			info.type = WindowType::Normal;
+		else if (type == _NET_WM_WINDOW_TYPE_SPLASH || type == _NET_WM_WINDOW_TYPE_UTILITY || type == _NET_WM_WINDOW_TYPE_DIALOG)
+			info.type = WindowType::Utility;
+		else
+			info.type = WindowType::Popup;
+	}
+wm_window_type_done:
+
+	if (auto it = window.properties.find(WM_TRANSIENT_FOR); it != window.properties.end())
+	{
+		if (it->value.type != WINDOW || it->value.data.size() != sizeof(CARD32))
+			goto transitient_for_done;
+
+		const CARD32 wid = *reinterpret_cast<const CARD32*>(it->value.data.data());
+
+		auto it2 = g_objects.find(wid);
+		if (it2 == g_objects.end())
+			goto transitient_for_done;
+		if (it2->value->type != Object::Type::Window)
+			goto transitient_for_done;
+
+		// FIXME: support child windows
+		auto& window = it2->value->object.get<Object::Window>();
+		info.transient_for = window.platform_window.ptr();
+	}
+transitient_for_done:
+
+	return info;
+}
+
 static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 {
 	auto& object = *g_objects[wid];
@@ -457,7 +516,17 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 	if (window.parent == g_root.windowId)
 	{
 		ASSERT(!window.platform_window);
-		window.platform_window = TRY(g_platform_ops.create_window(wid, window.width, window.height));
+
+		auto info = get_plaform_window_info(window);
+		window.platform_window = TRY(g_platform_ops.create_window(
+			info.transient_for,
+			info.type,
+			wid,
+			window.x,
+			window.y,
+			window.width,
+			window.height
+		));
 	}
 
 	window.mapped = true;

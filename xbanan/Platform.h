@@ -9,6 +9,13 @@ struct PlatformWindow
 	virtual ~PlatformWindow() = default;
 };
 
+enum class WindowType
+{
+	Popup,
+	Normal,
+	Utility,
+};
+
 // initialize, poll_events, create_window and invalidate are required
 struct PlatformOps
 {
@@ -17,7 +24,7 @@ struct PlatformOps
 	/* Handle pending events */
 	void (*poll_events)(void*);
 	/* Create a window with given size */
-	BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> (*create_window)(WINDOW wid, uint32_t width, uint32_t height);
+	BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> (*create_window)(PlatformWindow* parent, WindowType, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height);
 	/* Invaldate part of a window */
 	void (*invalidate)(PlatformWindow*, const uint32_t* pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 	/* Request resize of a window, can be async */

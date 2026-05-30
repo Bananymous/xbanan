@@ -60,8 +60,33 @@ void put_image(const PutImageInfo& info)
 		}
 		case ZPixmap:
 		{
+			bool needs_clipping = true;
+
+			if (info.gc.clip_mask == None)
+			{
+				needs_clipping = false;
+			}
+			else if (info.gc.clip_mask == UINT32_MAX)
+			{
+				const uint32_t clip_min_x = min_x - info.gc.clip_origin_x;
+				const uint32_t clip_min_y = min_y - info.gc.clip_origin_y;
+
+				const uint32_t clip_max_x = max_x - info.gc.clip_origin_x;
+				const uint32_t clip_max_y = max_y - info.gc.clip_origin_y;
+
+				for (const auto& rect : info.gc.clip_rects)
+				{
+					if (clip_min_x < rect.x || clip_max_x > rect.x + rect.width)
+						continue;
+					if (clip_min_y < rect.y || clip_max_y > rect.y + rect.height)
+						continue;
+					needs_clipping = false;
+					break;
+				}
+			}
+
 			ASSERT(info.left_pad == 0);
-			if (in_bpp == 32 && info.gc.clip_mask == None)
+			if (in_bpp == 32 && !needs_clipping)
 			{
 				const auto bytes_per_row = (max_x - min_x) * 4;
 				for (int32_t y = min_y; y < max_y; y++)

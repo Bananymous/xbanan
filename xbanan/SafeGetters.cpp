@@ -109,13 +109,12 @@ BAN::ErrorOr<DrawableInfo> get_drawable_info(Client& client_info, CARD32 drawabl
 	return info;
 }
 
-Object::Cursor& get_cursor_safe(CURSOR cid)
+PlatformCursor* get_cursor_safe(CURSOR cid)
 {
-	static Object::Cursor dummy {};
 	auto it = g_objects.find(cid);
 	if (it == g_objects.end())
-		return dummy;
+		return nullptr;
 	if (it->value->type != Object::Type::Cursor)
-		return dummy;
-	return it->value->object.get<Object::Cursor>();
+		return nullptr;
+	return it->value->object.get<BAN::UniqPtr<PlatformCursor>>().ptr();
 }

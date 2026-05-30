@@ -385,6 +385,8 @@ static BAN::ErrorOr<BAN::RefPtr<PCFFont>> parse_font(const BAN::String& path)
 	font->font_ascent  = font->max_bounds.ascent;
 	font->font_descent = font->max_bounds.descent;
 
+	font->is_cursor_font = (path == "fonts/misc/cursor.pcf.gz"_sv);
+
 	return font;
 }
 
@@ -938,6 +940,49 @@ BAN::ErrorOr<void> create_glyph_cursor(Client& client_info, BAN::ConstByteSpan p
 
 	const auto& source_font = TRY(get_fontable(client_info, request.source, X_CreateGlyphCursor));
 
+	// Try to use system cursor for known cursors
+	if (source_font->is_cursor_font && request.mask == request.source && request.sourceChar + 1 == request.maskChar && g_platform_ops.create_system_cursor)
+	{
+		BAN::Optional<SystemCursorType> type;
+		switch (request.sourceChar)
+		{
+			case  68: type = SystemCursorType::Pointer;          break;
+			case 152: type = SystemCursorType::Text;             break;
+			case 150: type = SystemCursorType::Wait;             break;
+			case  60: type = SystemCursorType::Hand;             break;
+			case  92: type = SystemCursorType::Help;             break;
+			case  52: type = SystemCursorType::Move;             break;
+			case  88: type = SystemCursorType::Forbidden;        break;
+			case 138: type = SystemCursorType::ResizeN;          break;
+			case  96: type = SystemCursorType::ResizeE;          break;
+			case  16: type = SystemCursorType::ResizeS;          break;
+			case  70: type = SystemCursorType::ResizeW;          break;
+			case 134: type = SystemCursorType::ResizeNW;         break;
+			case 136: type = SystemCursorType::ResizeNE;         break;
+			case  12: type = SystemCursorType::ResizeSW;         break;
+			case  14: type = SystemCursorType::ResizeSE;         break;
+			case 108: type = SystemCursorType::ResizeHorizontal; break;
+			case 116: type = SystemCursorType::ResizeVertical;   break;
+		}
+
+		if (type.has_value())
+		{
+			auto cursor_or_error = g_platform_ops.create_system_cursor(type.value());
+			if (!cursor_or_error.is_error())
+			{
+				TRY(client_info.objects.insert(request.cid));
+				TRY(g_objects.insert(
+					request.cid,
+					TRY(BAN::UniqPtr<Object>::create(Object {
+						.type = Object::Type::Cursor,
+						.object = BAN::move(cursor_or_error.value()),
+					}))
+				));
+				return {};
+			}
+		}
+	}
+
 	auto source_glyph_index = source_font->find_glyph(request.sourceChar);
 	if (!source_glyph_index.has_value())
 	{
@@ -958,19 +1003,14 @@ BAN::ErrorOr<void> create_glyph_cursor(Client& client_info, BAN::ConstByteSpan p
 	const uint32_t source_width = source_ci.rightSideBearing - source_ci.leftSideBearing;
 	const uint32_t source_height = source_ci.ascent + source_ci.descent;
 
-	Object::Cursor cursor {
-		.width = source_width,
-		.height = source_height,
-		.origin_x = -source_ci.leftSideBearing,
-		.origin_y =  source_ci.ascent,
-	};
-	TRY(cursor.pixels.resize(cursor.width * cursor.height));
+	BAN::Vector<uint32_t> pixels;
+	TRY(pixels.resize(source_width * source_height));
 
 	for (uint32_t y = 0; y < source_height; y++)
 	{
 		const uint8_t* row_base = source_font->bitmap.data() + source_glyph.bitmap_offset + (source_width + 7) / 8 * y;
 		for (uint32_t x = 0; x < source_width; x++)
-			cursor.pixels[y * source_width + x] = 0xFF000000 | ((row_base[x / 8] & (1 << (x % 8))) ? foreground : background);
+			pixels[y * source_width + x] = 0xFF000000 | ((row_base[x / 8] & (1 << (x % 8))) ? foreground : background);
 	}
 
 	if (request.mask != None)
@@ -1008,9 +1048,17 @@ BAN::ErrorOr<void> create_glyph_cursor(Client& client_info, BAN::ConstByteSpan p
 
 				const uint8_t* row_base = mask_font->bitmap.data() + mask_glyph.bitmap_offset + (mask_width + 7) / 8 * mask_y;
 				if (!(row_base[mask_x / 8] & (1 << (mask_x % 8))))
-					cursor.pixels[src_y * source_width + src_x] = 0;
+					pixels[src_y * source_width + src_x] = 0;
 			}
 		}
+	}
+
+	BAN::UniqPtr<PlatformCursor> cursor;
+	if (g_platform_ops.create_bitmap_cursor)
+	{
+		auto cursor_or_error = g_platform_ops.create_bitmap_cursor(pixels.data(), source_width, source_height, -source_ci.leftSideBearing, source_ci.ascent);
+		if (!cursor_or_error.is_error())
+			cursor = cursor_or_error.release_value();
 	}
 
 	TRY(client_info.objects.insert(request.cid));

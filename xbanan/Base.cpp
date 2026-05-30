@@ -711,6 +711,46 @@ WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y)
 	return wid;
 }
 
+static PlatformWindow* get_platform_window(const Object::Window& window)
+{
+	if (window.platform_window)
+		return const_cast<PlatformWindow*>(window.platform_window.ptr());
+	if (window.parent == None)
+		return nullptr;
+
+	auto& object = *g_objects[window.parent];
+	ASSERT(object.type == Object::Type::Window);
+	return get_platform_window(object.object.get<Object::Window>());
+}
+
+void update_cursor(WINDOW wid, int32_t x, int32_t y)
+{
+	if (g_platform_ops.set_cursor == nullptr)
+		return;
+
+	wid = find_child_window(wid, x, y);
+	if (wid == None)
+		return;
+
+	const CURSOR cid = [&wid]() -> CURSOR {
+		for (;;)
+		{
+			const auto& window = g_objects[wid]->object.get<Object::Window>();
+			if (window.cursor != None || window.parent == None)
+				return window.cursor;
+			wid = window.parent;
+		}
+	}();
+
+	static CURSOR active_cid = None;
+	if (cid == active_cid)
+		return;
+
+	const auto& window = g_objects[wid]->object.get<Object::Window>();
+	g_platform_ops.set_cursor(get_platform_window(window), get_cursor_safe(cid));
+
+	active_cid = cid;
+}
 
 static void on_root_client_message(const xEvent& event)
 {
@@ -930,7 +970,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
-			CURSOR cursor_id = None;
+			BAN::Optional<CURSOR> cursor_id = None;
 
 			BAN::Optional<uint32_t> background;
 			for (size_t i = 0; i < 32; i++)
@@ -967,25 +1007,11 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}
 			}
 
-			if (window.cursor != cursor_id)
+			if (cursor_id.has_value())
 			{
-				// FIXME: show cursor if wid is hovered
-
-				if (window.platform_window)
-				{
-					if (g_platform_ops.set_cursor)
-					{
-						const auto& cursor = get_cursor_safe(cursor_id);
-						g_platform_ops.set_cursor(
-							window.platform_window.ptr(),
-							cursor.pixels.data(),
-							cursor.width, cursor.height,
-							cursor.origin_x, cursor.origin_y
-						);
-					}
-				}
-
-				window.cursor = cursor_id;
+				window.cursor = cursor_id.value();
+				if (window.hovered)
+					update_cursor(request.window, window.cursor_x, window.cursor_y);
 			}
 
 			if (background.has_value())
@@ -2613,17 +2639,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				static_cast<uint32_t>(request.backBlue  >> 8) <<  8 |
 				static_cast<uint32_t>(request.backGreen >> 8) <<  0;
 
-			Object::Cursor cursor {
-				.width = source.width,
-				.height = source.height,
-				.origin_x = request.x,
-				.origin_y = request.y,
-			};
-			TRY(cursor.pixels.resize(cursor.width * cursor.height));
+			BAN::Vector<uint32_t> pixels;
+			TRY(pixels.resize(source.width * source.height));
 
 			auto* source_data_u32 = reinterpret_cast<const uint32_t*>(source.data.data());
-			for (size_t i = 0; i < cursor.width * cursor.height; i++)
-				cursor.pixels[i] = 0xFF000000 | (source_data_u32[i] ? foreground : background);
+			for (size_t i = 0; i < source.width * source.height; i++)
+				pixels[i] = 0xFF000000 | (source_data_u32[i] ? foreground : background);
 
 			if (request.mask != None)
 			{
@@ -2633,9 +2654,17 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				ASSERT(mask.height == source.height);
 
 				auto* mask_data_u32 = reinterpret_cast<const uint32_t*>(mask.data.data());
-				for (size_t i = 0; i < cursor.width * cursor.height; i++)
+				for (size_t i = 0; i < source.width * source.height; i++)
 					if (!mask_data_u32[i])
-						cursor.pixels[i] = 0;
+						pixels[i] = 0;
+			}
+
+			BAN::UniqPtr<PlatformCursor> cursor;
+			if (g_platform_ops.create_bitmap_cursor)
+			{
+				auto cursor_or_error = g_platform_ops.create_bitmap_cursor(pixels.data(), source.width, source.height, request.x, request.y);
+				if (!cursor_or_error.is_error())
+					cursor = cursor_or_error.release_value();
 			}
 
 			TRY(client_info.objects.insert(request.cid));

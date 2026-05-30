@@ -1,6 +1,8 @@
 #include "../Events.h"
 #include "../Platform.h"
 
+#include <BAN/Vector.h>
+
 #include <LibGUI/Window.h>
 
 struct BananWindow final : public PlatformWindow
@@ -12,6 +14,15 @@ struct BananWindow final : public PlatformWindow
 	}
 
 	BAN::UniqPtr<LibGUI::Window> window;
+};
+
+struct BananCursor final : public PlatformCursor
+{
+	BAN::Vector<uint32_t> pixels;
+	uint32_t width;
+	uint32_t height;
+	int32_t origin_x;
+	int32_t origin_y;
 };
 
 static bool bananos_initialize(uint32_t* display_w, uint32_t* display_h)
@@ -123,10 +134,39 @@ static void bananos_invalidate(PlatformWindow* window, const uint32_t* pixels, u
 	banan_window.window->invalidate(x, y, width, height);
 }
 
-static void bananos_set_cursor(PlatformWindow* window, const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_system_cursor(SystemCursorType type)
 {
+	(void)type;
+	return BAN::Error::from_errno(ENOTSUP);
+}
+
+static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_bitmap_cursor(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
+{
+	auto cursor = TRY(BAN::UniqPtr<BananCursor>::create());
+	cursor->width = width;
+	cursor->height = height;
+	cursor->origin_x = origin_x;
+	cursor->origin_y = origin_y;
+
+	TRY(cursor->pixels.resize(width * height));
+	memcpy(cursor->pixels.data(), pixels, cursor->pixels.size() * 4);
+
+	return BAN::UniqPtr<PlatformCursor>(BAN::move(cursor));
+}
+
+static void bananos_set_cursor(PlatformWindow* window, PlatformCursor* cursor)
+{
+	if (window == nullptr)
+		return;
+
 	auto& banan_window = *static_cast<BananWindow*>(window);
-	banan_window.window->set_cursor(width, height, { pixels, width * height }, origin_x, origin_y);
+	if (cursor == nullptr)
+		banan_window.window->set_cursor(0, 0, {}, 0, 0);
+	else
+	{
+		auto& banan_cursor = *static_cast<BananCursor*>(cursor);
+		banan_window.window->set_cursor(banan_cursor.width, banan_cursor.height, banan_cursor.pixels.span(), banan_cursor.origin_x, banan_cursor.origin_y);
+	}
 }
 
 static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
@@ -136,11 +176,13 @@ static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
 }
 
 PlatformOps g_platform_ops = {
-	.initialize         = bananos_initialize,
-	.poll_events        = bananos_poll_events,
-	.create_window      = bananos_create_window,
-	.invalidate         = bananos_invalidate,
-	.request_resize     = bananos_request_resize,
-	.request_fullscreen = bananos_request_fullscreen,
-	.set_cursor         = bananos_set_cursor,
+	.initialize           = bananos_initialize,
+	.poll_events          = bananos_poll_events,
+	.create_window        = bananos_create_window,
+	.invalidate           = bananos_invalidate,
+	.request_resize       = bananos_request_resize,
+	.request_fullscreen   = bananos_request_fullscreen,
+	.create_system_cursor = bananos_create_system_cursor,
+	.create_bitmap_cursor = bananos_create_bitmap_cursor,
+	.set_cursor           = bananos_set_cursor,
 };

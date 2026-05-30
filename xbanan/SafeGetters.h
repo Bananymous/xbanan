@@ -14,4 +14,4 @@ BAN::ErrorOr<Object::Pixmap&> get_pixmap(Client& client_info, CARD32 pid, BYTE o
 BAN::ErrorOr<Object::GraphicsContext&> get_gc(Client& client_info, CARD32 gc, BYTE op_major, BYTE op_minor = 0);
 BAN::ErrorOr<DrawableInfo> get_drawable_info(Client& client_info, CARD32 drawable, BYTE op_major, BYTE op_minor = 0);
 
-Object::Cursor& get_cursor_safe(CURSOR cid);
+PlatformCursor* get_cursor_safe(CURSOR cid);

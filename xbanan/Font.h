@@ -40,6 +40,8 @@ struct PCFFont : public BAN::RefCounted<PCFFont>, public BAN::Weakable<PCFFont>
 	BAN::Vector<MapEntry> map;
 	BAN::Vector<uint8_t> bitmap;
 
+	bool is_cursor_font;
+
 	BAN::Optional<uint16_t> find_glyph(uint16_t codepoint) const
 	{
 		size_t l = 0;

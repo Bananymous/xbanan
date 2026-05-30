@@ -41,15 +41,6 @@ struct Object
 
 	Type type;
 
-	struct Cursor
-	{
-		uint32_t width;
-		uint32_t height;
-		int32_t origin_x;
-		int32_t origin_y;
-		BAN::Vector<uint32_t> pixels;
-	};
-
 	struct Window
 	{
 		Client& owner;
@@ -57,6 +48,8 @@ struct Object
 		bool mapped { false };
 		bool focused { false };
 		bool fullscreen { false };
+		bool hovered { false };
+
 		uint8_t depth { 0 };
 		int32_t x { 0 };
 		int32_t y { 0 };
@@ -136,7 +129,7 @@ struct Object
 		void (*destructor)(Extension&);
 	};
 
-	BAN::Variant<Cursor, Window, Pixmap, GraphicsContext, BAN::RefPtr<PCFFont>, Extension> object;
+	BAN::Variant<Window, Pixmap, GraphicsContext, BAN::RefPtr<PCFFont>, BAN::UniqPtr<PlatformCursor>, Extension> object;
 };
 
 struct Client

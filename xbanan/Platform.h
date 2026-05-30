@@ -9,11 +9,37 @@ struct PlatformWindow
 	virtual ~PlatformWindow() = default;
 };
 
+struct PlatformCursor
+{
+	virtual ~PlatformCursor() = default;
+};
+
 enum class WindowType
 {
 	Popup,
 	Normal,
 	Utility,
+};
+
+enum class SystemCursorType
+{
+	Pointer,
+	Text,
+	Wait,
+	Hand,
+	Help,
+	Move,
+	Forbidden,
+	ResizeN,
+	ResizeE,
+	ResizeS,
+	ResizeW,
+	ResizeNW,
+	ResizeNE,
+	ResizeSW,
+	ResizeSE,
+	ResizeVertical,
+	ResizeHorizontal,
 };
 
 // initialize, poll_events, create_window and invalidate are required
@@ -31,7 +57,11 @@ struct PlatformOps
 	void (*request_resize)(PlatformWindow*, uint32_t width, uint32_t height);
 	/* Request new fullscreen state, can be async */
 	void (*request_fullscreen)(PlatformWindow*, bool fullscreen);
+	/* Create a system cursor */
+	BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> (*create_system_cursor)(SystemCursorType);
+	/* Create cursor from custom bitmap */
+	BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> (*create_bitmap_cursor)(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y);
 	/* Set custom cursor */
-	void (*set_cursor)(PlatformWindow*, const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y);
+	void (*set_cursor)(PlatformWindow*, PlatformCursor*);
 };
 extern PlatformOps g_platform_ops;

@@ -294,32 +294,6 @@ static void update_cursor_position_recursive(WINDOW wid, int32_t new_x, int32_t 
 	}
 }
 
-static void update_cursor(WINDOW wid, int32_t old_x, int32_t old_y, int32_t new_x, int32_t new_y)
-{
-	const auto old_wid = find_child_window(wid, old_x, old_y);
-	const auto new_wid = find_child_window(wid, new_x, new_y);
-	if (old_wid == new_wid || old_wid == None || new_wid == None)
-		return;
-
-	const auto& old_window = g_objects[old_wid]->object.get<Object::Window>();
-	const auto& new_window = g_objects[new_wid]->object.get<Object::Window>();
-	if (old_window.cursor == new_window.cursor)
-		return;
-
-	auto& window = g_objects[wid]->object.get<Object::Window>();
-	const auto& cursor = get_cursor_safe(window.cursor);
-
-	if (g_platform_ops.set_cursor)
-	{
-		g_platform_ops.set_cursor(
-			window.platform_window.ptr(),
-			cursor.pixels.data(),
-			cursor.width, cursor.height,
-			cursor.origin_x, cursor.origin_y
-		);
-	}
-}
-
 static BAN::Vector<WINDOW> get_path_to_child(WINDOW wid, int32_t x, int32_t y)
 {
 	BAN::Vector<WINDOW> result;
@@ -474,6 +448,12 @@ static void send_enter_and_leave_events(WINDOW old_wid, int32_t old_x, int32_t o
 		event.u.u.detail = detail;
 		MUST(window.send_event(event, EnterWindowMask));
 	}
+
+	for (const auto wid : old_child_path)
+		g_objects[wid]->object.get<Object::Window>().hovered = false;
+	for (const auto wid : new_child_path)
+		g_objects[wid]->object.get<Object::Window>().hovered = true;
+
 }
 
 void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
@@ -482,10 +462,11 @@ void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
 	ASSERT(object.type == Object::Type::Window);
 	auto& window = object.object.get<Object::Window>();
 
-	update_cursor(wid, window.cursor_x, window.cursor_y, x, y);
+	update_cursor(wid, x, y);
 
 	{
 		static WINDOW old_wid = g_root.windowId;
+
 		auto it = g_objects.find(old_wid);
 		if (it == g_objects.end())
 		{
@@ -497,6 +478,7 @@ void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
 		auto& old_window = it->value->object.get<Object::Window>();
 
 		send_enter_and_leave_events(old_wid, old_window.cursor_x, old_window.cursor_y, wid, x, y);
+
 		old_wid = wid;
 	}
 

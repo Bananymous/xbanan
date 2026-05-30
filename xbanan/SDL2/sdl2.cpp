@@ -39,6 +39,17 @@ struct SDLWindow final : public PlatformWindow
 	SDL_Texture*  texture  { nullptr };
 };
 
+struct SDLCursor final : public PlatformCursor
+{
+	~SDLCursor()
+	{
+		if (cursor != nullptr)
+			SDL_FreeCursor(cursor);
+	}
+
+	SDL_Cursor* cursor { nullptr };
+};
+
 static int s_eventfd { -1 };
 
 struct Keymap
@@ -47,6 +58,8 @@ struct Keymap
 	uint8_t map[SDL_NUM_SCANCODES];
 };
 static Keymap s_sdl_keymap;
+
+static SDL_Cursor* s_default_cursor { nullptr };
 
 static void* sdl2_thread(void*)
 {
@@ -76,6 +89,8 @@ static bool sdl2_initialize(uint32_t* display_w, uint32_t* display_h)
 	}
 	*display_w = DM.w;
 	*display_h = DM.h;
+
+	s_default_cursor = SDL_GetCursor();
 
 	s_eventfd = eventfd(0, 0);
 	if (s_eventfd == -1)
@@ -307,31 +322,115 @@ static void sdl2_invalidate(PlatformWindow* window, const uint32_t* src_pixels, 
 	SDL_RenderPresent(sdl_window.renderer);
 }
 
-static void sdl2_set_cursor(PlatformWindow* window, const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
-{
-	auto& sdl_window = *static_cast<SDLWindow*>(window);
-	(void)sdl_window;
-	(void)pixels;
-	(void)width;
-	(void)height;
-	(void)origin_x;
-	(void)origin_y;
-}
-
 static void sdl2_request_fullscreen(PlatformWindow* window, bool fullscreen)
 {
 	auto& sdl_window = *static_cast<SDLWindow*>(window);
 	SDL_SetWindowFullscreen(sdl_window.window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 }
 
+static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_system_cursor(SystemCursorType type)
+{
+	SDL_SystemCursor sdl_type;
+	switch (type)
+	{
+		case SystemCursorType::Help:
+		case SystemCursorType::Pointer:
+			sdl_type = SDL_SYSTEM_CURSOR_ARROW;
+			break;
+		case SystemCursorType::Text:
+			sdl_type = SDL_SYSTEM_CURSOR_IBEAM;
+			break;
+		case SystemCursorType::Wait:
+			sdl_type = SDL_SYSTEM_CURSOR_WAIT;
+			break;
+		case SystemCursorType::Hand:
+			sdl_type = SDL_SYSTEM_CURSOR_HAND;
+			break;
+		case SystemCursorType::Move:
+			sdl_type = SDL_SYSTEM_CURSOR_SIZEALL;
+			break;
+		case SystemCursorType::Forbidden:
+			sdl_type = SDL_SYSTEM_CURSOR_NO;
+			break;
+		case SystemCursorType::ResizeN:
+		case SystemCursorType::ResizeS:
+		case SystemCursorType::ResizeVertical:
+			sdl_type = SDL_SYSTEM_CURSOR_SIZENS;
+			break;
+		case SystemCursorType::ResizeE:
+		case SystemCursorType::ResizeW:
+		case SystemCursorType::ResizeHorizontal:
+			sdl_type = SDL_SYSTEM_CURSOR_SIZEWE;
+			break;
+		case SystemCursorType::ResizeNW:
+		case SystemCursorType::ResizeSE:
+			sdl_type = SDL_SYSTEM_CURSOR_SIZENWSE;
+			break;
+		case SystemCursorType::ResizeNE:
+		case SystemCursorType::ResizeSW:
+			sdl_type = SDL_SYSTEM_CURSOR_SIZENESW;
+			break;
+	}
+
+	auto cursor = TRY(BAN::UniqPtr<SDLCursor>::create());
+
+	cursor->cursor = SDL_CreateSystemCursor(sdl_type);
+	if (cursor->cursor == nullptr)
+	{
+		dwarnln("Could not create SDL system cursor: {}", SDL_GetError());
+		return BAN::Error::from_errno(EFAULT);
+	}
+
+	return BAN::UniqPtr<PlatformCursor>(BAN::move(cursor));
+}
+
+static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_bitmap_cursor(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
+{
+	auto cursor = TRY(BAN::UniqPtr<SDLCursor>::create());
+
+	SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormatFrom(const_cast<uint32_t*>(pixels), width, height, 32, width * 4, SDL_PIXELFORMAT_ARGB8888);
+	if (surface == nullptr)
+	{
+		dwarnln("Could not create SDL surface for cursor: {}", SDL_GetError());
+		return BAN::Error::from_errno(EFAULT);
+	}
+
+	origin_x = BAN::Math::clamp<int32_t>(origin_x, 0, width  - 1);
+	origin_y = BAN::Math::clamp<int32_t>(origin_y, 0, height - 1);
+	cursor->cursor = SDL_CreateColorCursor(surface, origin_x, origin_y);
+
+	SDL_FreeSurface(surface);
+
+	if (cursor->cursor == nullptr)
+	{
+		dwarnln("Could not create SDL color cursor: {}", SDL_GetError());
+		return BAN::Error::from_errno(EFAULT);
+	}
+
+	return BAN::UniqPtr<PlatformCursor>(BAN::move(cursor));
+}
+
+static void sdl2_set_cursor(PlatformWindow*, PlatformCursor* cursor)
+{
+	if (cursor == nullptr)
+		SDL_SetCursor(s_default_cursor);
+	else
+	{
+		auto& sdl_cursor = *static_cast<SDLCursor*>(cursor);
+		SDL_SetCursor(sdl_cursor.cursor);
+	}
+}
+
 PlatformOps g_platform_ops = {
-	.initialize         = sdl2_initialize,
-	.poll_events        = sdl2_poll_events,
-	.create_window      = sdl2_create_window,
-	.invalidate         = sdl2_invalidate,
-	.request_resize     = sdl2_request_resize,
-	.request_fullscreen = sdl2_request_fullscreen,
-	.set_cursor         = sdl2_set_cursor,
+	.initialize           = sdl2_initialize,
+	.poll_events          = sdl2_poll_events,
+	.create_window        = sdl2_create_window,
+	.invalidate           = sdl2_invalidate,
+	.request_resize       = sdl2_request_resize,
+	.request_fullscreen   = sdl2_request_fullscreen,
+	.create_system_cursor = sdl2_create_system_cursor,
+	.create_bitmap_cursor = sdl2_create_bitmap_cursor,
+	.set_cursor           = sdl2_set_cursor,
 };
 
 #include <LibInput/KeyEvent.h>

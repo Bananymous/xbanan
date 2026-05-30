@@ -374,6 +374,9 @@ void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 
 	for (;;)
 	{
+		if (wid == g_root.windowId)
+			return;
+
 		auto& object = *g_objects[wid];
 		ASSERT(object.type == Object::Type::Window);
 
@@ -512,10 +515,17 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 	auto& window = object.object.get<Object::Window>();
 	if (window.mapped)
 		return {};
+	window.mapped = true;
 
 	if (window.parent == g_root.windowId)
 	{
 		ASSERT(!window.platform_window);
+
+		// NOTE: This is not perfect but seems to work.
+		//       This is used to not display "dummy" event windows
+		//       that should not be visible.
+		if (window.width <= 10 || window.height <= 10)
+			return {};
 
 		auto info = get_plaform_window_info(window);
 		window.platform_window = TRY(g_platform_ops.create_window(
@@ -528,8 +538,6 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 			window.height
 		));
 	}
-
-	window.mapped = true;
 
 	for (auto& pixel : window.pixels)
 		pixel = window.background;

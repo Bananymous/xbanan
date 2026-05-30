@@ -2052,8 +2052,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 						.depth = request.depth,
 						.width = request.width,
 						.height = request.height,
-						.data = data.span(),
-						.owned_data = BAN::move(data),
+						.data = BAN::move(data),
 					}
 				}))
 			));

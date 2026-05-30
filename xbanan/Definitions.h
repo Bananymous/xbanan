@@ -81,8 +81,7 @@ struct Object
 		CARD8 depth;
 		CARD32 width;
 		CARD32 height;
-		BAN::ByteSpan data;
-		BAN::Vector<uint8_t> owned_data;
+		BAN::Vector<uint8_t> data;
 	};
 
 	struct GraphicsContext

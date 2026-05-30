@@ -7,41 +7,12 @@
 #include <X11/X.h>
 #include <X11/extensions/shmproto.h>
 
-#include <netinet/in.h>
 #include <sys/shm.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 static BYTE s_shm_event_base;
 static BYTE s_shm_error_base;
 static BYTE s_shm_major_opcode;
-
-static bool is_local_socket(int socket)
-{
-	sockaddr_storage addr;
-	socklen_t addr_len = sizeof(addr);
-	if (getpeername(socket, reinterpret_cast<sockaddr*>(&addr), &addr_len) == -1)
-		return false;
-
-	switch (addr.ss_family)
-	{
-		case AF_UNIX:
-			return true;
-		case AF_INET:
-		{
-			const auto* addr_in = reinterpret_cast<const sockaddr_in*>(&addr);
-			const auto ipv4 = ntohl(addr_in->sin_addr.s_addr);
-			return (ipv4 & IN_CLASSA_NET) == IN_LOOPBACKNET;
-		}
-		case AF_INET6:
-		{
-			const auto* addr_in6 = reinterpret_cast<const sockaddr_in6*>(&addr);
-			return IN6_IS_ADDR_LOOPBACK(&addr_in6->sin6_addr);
-		}
-	}
-
-	return false;
-}
 
 static BAN::ErrorOr<void*> get_shmseg(Client& client_info, CARD32 shmseg, BYTE op_major, BYTE op_minor)
 {
@@ -78,7 +49,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 
 			xShmQueryVersionReply reply {
 				.type = X_Reply,
-				.sharedPixmaps = is_local_socket(client_info.fd),
+				.sharedPixmaps = false,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 				.majorVersion = 1,
@@ -262,40 +233,6 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.size = dwords * 4,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-
-			break;
-		}
-		case X_ShmCreatePixmap:
-		{
-			auto request = decode<xShmCreatePixmapReq>(packet).value();
-
-			dprintln("ShmCreatePixmap");
-			dprintln("  depth:    {}", request.depth);
-			dprintln("  pid:      {}", request.pid);
-			dprintln("  drawable: {}", request.drawable);
-			dprintln("  width:    {}", request.width);
-			dprintln("  height:   {}", request.height);
-			dprintln("  shmseg:   {}", request.shmseg);
-			dprintln("  offset:   {}", request.offset);
-
-			ASSERT(request.depth == 24 || request.depth == 32);
-
-			void* shm_segment = TRY(get_shmseg(client_info, request.shmseg, op_major, op_minor));
-
-			TRY(client_info.objects.insert(request.pid));
-			TRY(g_objects.insert(
-				request.pid,
-				TRY(BAN::UniqPtr<Object>::create(Object {
-					.type = Object::Type::Pixmap,
-					.object = Object::Pixmap {
-						.depth = request.depth,
-						.width = request.width,
-						.height = request.height,
-						.data = BAN::ByteSpan(static_cast<uint8_t*>(shm_segment) + request.offset, request.width * request.height * 4),
-						.owned_data = {},
-					}
-				}))
-			));
 
 			break;
 		}

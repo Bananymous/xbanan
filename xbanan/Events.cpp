@@ -453,7 +453,22 @@ static void send_enter_and_leave_events(WINDOW old_wid, int32_t old_x, int32_t o
 		g_objects[wid]->object.get<Object::Window>().hovered = false;
 	for (const auto wid : new_child_path)
 		g_objects[wid]->object.get<Object::Window>().hovered = true;
+}
 
+static WINDOW s_current_top_level_window = None;
+
+void on_window_leave_event(WINDOW wid)
+{
+	if (s_current_top_level_window != wid)
+		return;
+
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+	auto& window = object.object.get<Object::Window>();
+
+	send_enter_and_leave_events(wid, window.cursor_x, window.cursor_y, wid, -1, -1);
+
+	s_current_top_level_window = None;
 }
 
 void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
@@ -464,23 +479,16 @@ void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y)
 
 	update_cursor(wid, x, y);
 
+	if (auto it = g_objects.find(s_current_top_level_window); it == g_objects.end())
+		send_enter_and_leave_events(wid, -1, -1, wid, x, y);
+	else
 	{
-		static WINDOW old_wid = g_root.windowId;
-
-		auto it = g_objects.find(old_wid);
-		if (it == g_objects.end())
-		{
-			old_wid = g_root.windowId;
-			it = g_objects.find(g_root.windowId);
-		}
-
 		ASSERT(it->value->type == Object::Type::Window);
 		auto& old_window = it->value->object.get<Object::Window>();
-
-		send_enter_and_leave_events(old_wid, old_window.cursor_x, old_window.cursor_y, wid, x, y);
-
-		old_wid = wid;
+		send_enter_and_leave_events(s_current_top_level_window, old_window.cursor_x, old_window.cursor_y, wid, x, y);
 	}
+
+	s_current_top_level_window = wid;
 
 	update_cursor_position_recursive(wid, x, y);
 

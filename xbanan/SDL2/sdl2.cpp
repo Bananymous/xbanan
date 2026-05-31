@@ -215,6 +215,9 @@ static void sdl2_poll_events(void*)
 					case SDL_WINDOWEVENT_RESTORED:
 						on_window_fullscreen_event(window.wid, false);
 						break;
+					case SDL_WINDOWEVENT_LEAVE:
+						on_window_leave_event(window.wid);
+						break;
 				}
 				break;
 			}

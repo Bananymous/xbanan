@@ -1940,12 +1940,15 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
-			int32_t root_x, root_y;
-			int32_t event_x, event_y;
-			root_x = event_x = window.cursor_x;
-			root_y = event_y = window.cursor_y;
-
-			const auto child_wid = find_child_window(wid, event_x, event_y);
+			WINDOW child_wid { None };
+			for (auto wid_ : window.children)
+			{
+				const auto& child_window = g_objects[wid_]->object.get<Object::Window>();
+				if (!child_window.hovered)
+					continue;
+				child_wid = wid_;
+				break;
+			}
 
 			xQueryPointerReply reply {
 				.type = X_Reply,
@@ -1953,11 +1956,11 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 				.root = g_root.windowId,
-				.child = static_cast<CARD32>(child_wid == wid ? None : child_wid),
-				.rootX = static_cast<INT16>(root_x),
-				.rootY = static_cast<INT16>(root_y),
-				.winX = static_cast<INT16>(event_x),
-				.winY = static_cast<INT16>(event_y),
+				.child = static_cast<CARD32>(child_wid),
+				.rootX = static_cast<INT16>(window.cursor_x), // FIXME
+				.rootY = static_cast<INT16>(window.cursor_y), // FIXME
+				.winX = static_cast<INT16>(window.cursor_x),
+				.winY = static_cast<INT16>(window.cursor_y),
 				.mask = static_cast<KeyButMask>(g_keymask | g_butmask),
 			};
 			TRY(encode(client_info.output_buffer, reply));

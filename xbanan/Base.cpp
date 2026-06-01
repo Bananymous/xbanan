@@ -28,6 +28,8 @@ CARD16 g_keymask { 0 };
 CARD16 g_butmask { 0 };
 WINDOW g_focus_window { None };
 
+static WINDOW s_pointer_grab_wid = None;
+
 static const char* s_opcode_to_name[] {
 	[0] = "none",
 	[X_CreateWindow] = "X_CreateWindow",
@@ -1852,13 +1854,37 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  cursor:       {}", request.cursor);
 			dprintln("  time:         {}", request.time);
 
-			xGrabPointerReply reply {
-				.type = X_Reply,
-				.status = Success,
-				.sequenceNumber = client_info.sequence,
-				.length = 0,
-			};
-			TRY(encode(client_info.output_buffer, reply));
+			auto& window = TRY_REF(get_window(client_info, request.grabWindow, X_GrabPointer));
+
+			if (s_pointer_grab_wid != None && !g_objects.contains(s_pointer_grab_wid))
+				s_pointer_grab_wid = None;
+
+			if (s_pointer_grab_wid == None)
+			{
+				xGrabPointerReply reply {
+					.type = X_Reply,
+					.status = Success,
+					.sequenceNumber = client_info.sequence,
+					.length = 0,
+				};
+				TRY(encode(client_info.output_buffer, reply));
+
+				if (g_platform_ops.set_pointer_grab)
+					if (auto* platform_window = get_platform_window(window))
+						g_platform_ops.set_pointer_grab(platform_window, true);
+
+				s_pointer_grab_wid = request.grabWindow;
+			}
+			else
+			{
+				xGrabPointerReply reply {
+					.type = X_Reply,
+					.status = AlreadyGrabbed,
+					.sequenceNumber = client_info.sequence,
+					.length = 0,
+				};
+				TRY(encode(client_info.output_buffer, reply));
+			}
 
 			break;
 		}
@@ -1868,6 +1894,16 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("UngrabPointer");
 			dprintln("  time: {}", time);
+
+			if (s_pointer_grab_wid == None)
+				break;
+
+			auto it = g_objects.find(s_pointer_grab_wid);
+			if (it != g_objects.end() && g_platform_ops.set_pointer_grab)
+				if (auto* platform_window = get_platform_window(it->value->object.get<Object::Window>()))
+					g_platform_ops.set_pointer_grab(platform_window, false);
+
+			s_pointer_grab_wid = None;
 
 			break;
 		}

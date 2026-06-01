@@ -356,6 +356,12 @@ static void sdl3_query_pointer(int32_t* x, int32_t* y)
 	*y = cy;
 }
 
+static void sdl3_set_pointer_grab(PlatformWindow* window, bool grabbed)
+{
+	auto& sdl_window = *static_cast<SDLWindow*>(window);
+	SDL_SetWindowMouseGrab(sdl_window.window, grabbed);
+}
+
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl3_create_system_cursor(SystemCursorType type)
 {
 	static constexpr SDL_SystemCursor cursor_type_map[] {
@@ -437,6 +443,7 @@ PlatformOps g_platform_ops = {
 	.request_fullscreen   = sdl3_request_fullscreen,
 	.warp_pointer         = sdl3_warp_pointer,
 	.query_pointer        = sdl3_query_pointer,
+	.set_pointer_grab     = sdl3_set_pointer_grab,
 	.create_system_cursor = sdl3_create_system_cursor,
 	.create_bitmap_cursor = sdl3_create_bitmap_cursor,
 	.set_cursor           = sdl3_set_cursor,

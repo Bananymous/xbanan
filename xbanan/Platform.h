@@ -63,6 +63,8 @@ struct PlatformOps
 	void (*warp_pointer)(int32_t x, int32_t y, bool relative);
 	/* Get global position of the pointer */
 	void (*query_pointer)(int32_t* x, int32_t* y);
+	/* Grab pointer events on window */
+	void (*set_pointer_grab)(PlatformWindow*, bool grabbed);
 	/* Create a system cursor */
 	BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> (*create_system_cursor)(SystemCursorType);
 	/* Create cursor from custom bitmap */

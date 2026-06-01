@@ -61,6 +61,8 @@ struct PlatformOps
 	void (*request_fullscreen)(PlatformWindow*, bool fullscreen);
 	/* Warp pointer */
 	void (*warp_pointer)(int32_t x, int32_t y, bool relative);
+	/* Get global position of the pointer */
+	void (*query_pointer)(int32_t* x, int32_t* y);
 	/* Create a system cursor */
 	BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> (*create_system_cursor)(SystemCursorType);
 	/* Create cursor from custom bitmap */

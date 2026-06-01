@@ -1967,6 +1967,16 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			}
 
 			const auto [root_x, root_y] = get_window_position(wid);
+
+			int32_t root_cursor_x, root_cursor_y;
+			if (g_platform_ops.query_pointer)
+				g_platform_ops.query_pointer(&root_cursor_x, &root_cursor_y);
+			else
+			{
+				root_cursor_x = root_x + window.cursor_x;
+				root_cursor_y = root_y + window.cursor_y;
+			}
+
 			xQueryPointerReply reply {
 				.type = X_Reply,
 				.sameScreen = xTrue,
@@ -1974,10 +1984,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 0,
 				.root = g_root.windowId,
 				.child = static_cast<CARD32>(child_wid),
-				.rootX = static_cast<INT16>(root_x + window.cursor_x),
-				.rootY = static_cast<INT16>(root_y + window.cursor_y),
-				.winX = static_cast<INT16>(window.cursor_x),
-				.winY = static_cast<INT16>(window.cursor_y),
+				.rootX = static_cast<INT16>(root_cursor_x),
+				.rootY = static_cast<INT16>(root_cursor_y),
+				.winX = static_cast<INT16>(root_cursor_x - root_x),
+				.winY = static_cast<INT16>(root_cursor_y - root_y),
 				.mask = static_cast<KeyButMask>(g_keymask | g_butmask),
 			};
 			TRY(encode(client_info.output_buffer, reply));

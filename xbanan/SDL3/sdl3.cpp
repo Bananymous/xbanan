@@ -348,6 +348,14 @@ static void sdl3_warp_pointer(int32_t x, int32_t y, bool relative)
 	SDL_WarpMouseGlobal(x, y);
 }
 
+static void sdl3_query_pointer(int32_t* x, int32_t* y)
+{
+	float cx, cy;
+	SDL_GetGlobalMouseState(&cx, &cy);
+	*x = cx;
+	*y = cy;
+}
+
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl3_create_system_cursor(SystemCursorType type)
 {
 	static constexpr SDL_SystemCursor cursor_type_map[] {
@@ -428,6 +436,7 @@ PlatformOps g_platform_ops = {
 	.request_reposition   = sdl3_request_reposition,
 	.request_fullscreen   = sdl3_request_fullscreen,
 	.warp_pointer         = sdl3_warp_pointer,
+	.query_pointer        = sdl3_query_pointer,
 	.create_system_cursor = sdl3_create_system_cursor,
 	.create_bitmap_cursor = sdl3_create_bitmap_cursor,
 	.set_cursor           = sdl3_set_cursor,

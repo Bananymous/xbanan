@@ -154,6 +154,12 @@ static void bananos_warp_pointer(int32_t x, int32_t y, bool relative)
 	(void)relative;
 }
 
+static void bananos_query_pointer(int32_t* x, int32_t* y)
+{
+	(void)x;
+	(void)y;
+}
+
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_system_cursor(SystemCursorType type)
 {
 	(void)type;
@@ -198,6 +204,7 @@ PlatformOps g_platform_ops = {
 	.request_reposition   = bananos_request_reposition,
 	.request_fullscreen   = bananos_request_fullscreen,
 	.warp_pointer         = bananos_warp_pointer,
+	.query_pointer        = nullptr, /* bananos_query_pointer */
 	.create_system_cursor = bananos_create_system_cursor,
 	.create_bitmap_cursor = bananos_create_bitmap_cursor,
 	.set_cursor           = bananos_set_cursor,

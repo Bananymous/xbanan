@@ -290,6 +290,18 @@ int main()
 				window.event_masks.remove(&client_info);
 			}
 
+			for (auto it = client_info.objects.begin(); it != client_info.objects.end();)
+			{
+				auto obj_it = g_objects.find(*it);
+				if (obj_it == g_objects.end() || obj_it->value->type != Object::Type::Window)
+					it++;
+				else
+				{
+					(void)destroy_window(client_info, *it);
+					it = client_info.objects.begin();
+				}
+			}
+
 			for (auto id : client_info.objects)
 			{
 				auto it = g_objects.find(id);
@@ -304,14 +316,13 @@ int main()
 					case Object::Type::Pixmap:
 					case Object::Type::GraphicsContext:
 					case Object::Type::Font:
-					case Object::Type::Window:
 						break;
+					case Object::Type::Window:
+						ASSERT_NOT_REACHED();
 					case Object::Type::Extension:
-					{
 						auto& extension = object.object.get<Object::Extension>();
 						extension.destructor(extension);
 						break;
-					}
 				}
 
 				g_objects.remove(it);

@@ -2013,6 +2013,36 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_WarpPointer:
+		{
+			auto request = decode<xWarpPointerReq>(packet).value();
+
+			dprintln("WarpPointer");
+			dprintln("  src_wid: {}", request.srcWid);
+			dprintln("  src_x:   {}", request.srcX);
+			dprintln("  src_y:   {}", request.srcY);
+			dprintln("  src_w:   {}", request.srcWidth);
+			dprintln("  src_h:   {}", request.srcHeight);
+			dprintln("  dst_wid: {}", request.dstWid);
+			dprintln("  dst_x:   {}", request.dstX);
+			dprintln("  dst_y:   {}", request.dstY);
+
+			if (g_platform_ops.warp_pointer == nullptr)
+				break;
+
+			// TODO: source window :)
+
+			if (request.dstWid == None)
+				g_platform_ops.warp_pointer(request.dstX, request.dstY, true);
+			else
+			{
+				(void)TRY_REF(get_window(client_info, request.dstWid, X_WarpPointer));
+				const auto [win_x, win_y] = get_window_position(request.dstWid);
+				g_platform_ops.warp_pointer(win_x + request.dstX, win_y + request.dstY, false);
+			}
+
+			break;
+		}
 		case X_QueryKeymap:
 		{
 			dprintln("QueryKeymap");

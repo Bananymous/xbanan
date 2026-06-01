@@ -335,6 +335,19 @@ static void sdl3_request_fullscreen(PlatformWindow* window, bool fullscreen)
 	SDL_SetWindowFullscreen(sdl_window.window, fullscreen);
 }
 
+static void sdl3_warp_pointer(int32_t x, int32_t y, bool relative)
+{
+	if (relative)
+	{
+		float cx, cy;
+		SDL_GetGlobalMouseState(&cx, &cy);
+		x += cx;
+		x += cy;
+	}
+
+	SDL_WarpMouseGlobal(x, y);
+}
+
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl3_create_system_cursor(SystemCursorType type)
 {
 	static constexpr SDL_SystemCursor cursor_type_map[] {
@@ -414,6 +427,7 @@ PlatformOps g_platform_ops = {
 	.request_resize       = sdl3_request_resize,
 	.request_reposition   = sdl3_request_reposition,
 	.request_fullscreen   = sdl3_request_fullscreen,
+	.warp_pointer         = sdl3_warp_pointer,
 	.create_system_cursor = sdl3_create_system_cursor,
 	.create_bitmap_cursor = sdl3_create_bitmap_cursor,
 	.set_cursor           = sdl3_set_cursor,

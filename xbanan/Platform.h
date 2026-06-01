@@ -55,6 +55,8 @@ struct PlatformOps
 	void (*invalidate)(PlatformWindow*, const uint32_t* pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 	/* Request resize of a window, can be async */
 	void (*request_resize)(PlatformWindow*, uint32_t width, uint32_t height);
+	/* Request window repositioning */
+	void (*request_reposition)(PlatformWindow*, int32_t x, int32_t y);
 	/* Request new fullscreen state, can be async */
 	void (*request_fullscreen)(PlatformWindow*, bool fullscreen);
 	/* Create a system cursor */

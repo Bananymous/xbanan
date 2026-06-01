@@ -719,6 +719,21 @@ WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y)
 	return wid;
 }
 
+xPoint get_window_position(WINDOW wid)
+{
+	xPoint result { .x = 0, .y = 0 };
+
+	while (wid != None)
+	{
+		const auto& window = g_objects[wid]->object.get<Object::Window>();
+		result.x += window.x;
+		result.y += window.y;
+		wid = window.parent;
+	}
+
+	return result;
+}
+
 static PlatformWindow* get_platform_window(const Object::Window& window)
 {
 	if (window.platform_window)
@@ -1239,18 +1254,21 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}
 			}
 
-			bool window_changed = false;
-
-			const int32_t min_x = BAN::Math::min(window.x, new_x);
-			const int32_t min_y = BAN::Math::min(window.y, new_y);
-			const int32_t max_x = BAN::Math::max(window.x + window.width, new_x + new_width);
-			const int32_t max_y = BAN::Math::max(window.y + window.height, new_y + new_height);
+			bool send_configure = false;
 
 			if (new_x != window.x || new_y != window.y)
 			{
-				window.x = new_x;
-				window.y = new_y;
-				window_changed = true;
+				if (window.platform_window)
+				{
+					if (g_platform_ops.request_reposition)
+						g_platform_ops.request_reposition(window.platform_window.ptr(), new_x, new_y);
+				}
+				else
+				{
+					window.x = new_x;
+					window.y = new_y;
+					send_configure = true;
+				}
 			}
 
 			if (new_width != window.width || new_height != window.height)
@@ -1259,22 +1277,20 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				{
 					if (g_platform_ops.request_resize)
 						g_platform_ops.request_resize(window.platform_window.ptr(), new_width, new_height);
-					window_changed = false;
 				}
 				else
 				{
-					window.width  = new_width;
-					window.height = new_height;
-
 					TRY(window.pixels.resize(new_width * new_height));
 					for (auto& pixel : window.pixels)
 						pixel = window.background;
 
-					window_changed = true;
+					window.width  = new_width;
+					window.height = new_height;
+					send_configure = true;
 				}
 			}
 
-			if (!window_changed)
+			if (!send_configure)
 				break;
 
 			{
@@ -1950,6 +1966,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				break;
 			}
 
+			const auto [root_x, root_y] = get_window_position(wid);
 			xQueryPointerReply reply {
 				.type = X_Reply,
 				.sameScreen = xTrue,
@@ -1957,8 +1974,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 0,
 				.root = g_root.windowId,
 				.child = static_cast<CARD32>(child_wid),
-				.rootX = static_cast<INT16>(window.cursor_x), // FIXME
-				.rootY = static_cast<INT16>(window.cursor_y), // FIXME
+				.rootX = static_cast<INT16>(root_x + window.cursor_x),
+				.rootY = static_cast<INT16>(root_y + window.cursor_y),
 				.winX = static_cast<INT16>(window.cursor_x),
 				.winY = static_cast<INT16>(window.cursor_y),
 				.mask = static_cast<KeyButMask>(g_keymask | g_butmask),
@@ -1977,14 +1994,20 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  src_x:   {}", request.srcX);
 			dprintln("  src_y:   {}", request.srcY);
 
+			(void)TRY_REF(get_window(client_info, request.dstWid, X_TranslateCoords));
+			(void)TRY_REF(get_window(client_info, request.srcWid, X_TranslateCoords));
+
+			const auto [src_x, src_y] = get_window_position(request.srcWid);
+			const auto [dst_x, dst_y] = get_window_position(request.dstWid);
+
 			xTranslateCoordsReply reply {
 				.type = X_Reply,
 				.sameScreen = xTrue,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
-				.child = None,
-				.dstX = request.srcX,
-				.dstY = request.srcY,
+				.child = None, // FIXME
+				.dstX = static_cast<INT16>(src_x + request.srcX - dst_x),
+				.dstY = static_cast<INT16>(src_y + request.srcY - dst_y),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 

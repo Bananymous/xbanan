@@ -120,6 +120,13 @@ static void bananos_request_resize(PlatformWindow* window, uint32_t width, uint3
 	banan_window.window->request_resize(width, height);
 }
 
+static void bananos_request_reposition(PlatformWindow* window, int32_t x, int32_t y)
+{
+	(void)window;
+	(void)x;
+	(void)y;
+}
+
 static void bananos_invalidate(PlatformWindow* window, const uint32_t* pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
@@ -132,6 +139,12 @@ static void bananos_invalidate(PlatformWindow* window, const uint32_t* pixels, u
 			out_pixels[(y + y_off) * win_width + (x + x_off)] = pixels[(y + y_off) * win_width + (x + x_off)];
 
 	banan_window.window->invalidate(x, y, width, height);
+}
+
+static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
+{
+	auto& banan_window = *static_cast<BananWindow*>(window);
+	banan_window.window->set_fullscreen(fullscreen);
 }
 
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_system_cursor(SystemCursorType type)
@@ -169,18 +182,13 @@ static void bananos_set_cursor(PlatformWindow* window, PlatformCursor* cursor)
 	}
 }
 
-static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
-{
-	auto& banan_window = *static_cast<BananWindow*>(window);
-	banan_window.window->set_fullscreen(fullscreen);
-}
-
 PlatformOps g_platform_ops = {
 	.initialize           = bananos_initialize,
 	.poll_events          = bananos_poll_events,
 	.create_window        = bananos_create_window,
 	.invalidate           = bananos_invalidate,
 	.request_resize       = bananos_request_resize,
+	.request_reposition   = bananos_request_reposition,
 	.request_fullscreen   = bananos_request_fullscreen,
 	.create_system_cursor = bananos_create_system_cursor,
 	.create_bitmap_cursor = bananos_create_bitmap_cursor,

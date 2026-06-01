@@ -138,7 +138,11 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(PlatformWin
 	else
 	{
 		auto& sdl_parent = *static_cast<SDLWindow*>(parent);
-		window->window = SDL_CreatePopupWindow(sdl_parent.window, x, y, width, height, flags | SDL_WINDOW_POPUP_MENU);
+
+		int parent_x, parent_y;
+		SDL_GetWindowPosition(sdl_parent.window, &parent_x, &parent_y);
+
+		window->window = SDL_CreatePopupWindow(sdl_parent.window, x - parent_x, y - parent_y, width, height, flags | SDL_WINDOW_POPUP_MENU);
 	}
 
 	if (window->window == nullptr)
@@ -172,6 +176,12 @@ static void sdl3_request_resize(PlatformWindow* window, uint32_t width, uint32_t
 	SDL_SetWindowSize(sdl_window.window, width, height);
 }
 
+static void sdl3_request_reposition(PlatformWindow* window, int32_t x, int32_t y)
+{
+	auto& sdl_window = *static_cast<SDLWindow*>(window);
+	SDL_SetWindowPosition(sdl_window.window, x, y);
+}
+
 static void sdl3_poll_events(void*)
 {
 	uint64_t dummy;
@@ -199,6 +209,10 @@ static void sdl3_poll_events(void*)
 
 					on_window_resize_event(window.wid, window.width, window.height);
 				}
+				break;
+			case SDL_EVENT_WINDOW_MOVED:
+				if (auto it = s_window_map.find(event.motion.windowID); it != s_window_map.end())
+					on_window_move_event(it->value->wid, event.window.data1, event.window.data2);
 				break;
 			case SDL_EVENT_WINDOW_FOCUS_GAINED:
 			case SDL_EVENT_WINDOW_FOCUS_LOST:
@@ -398,6 +412,7 @@ PlatformOps g_platform_ops = {
 	.create_window        = sdl3_create_window,
 	.invalidate           = sdl3_invalidate,
 	.request_resize       = sdl3_request_resize,
+	.request_reposition   = sdl3_request_reposition,
 	.request_fullscreen   = sdl3_request_fullscreen,
 	.create_system_cursor = sdl3_create_system_cursor,
 	.create_bitmap_cursor = sdl3_create_bitmap_cursor,

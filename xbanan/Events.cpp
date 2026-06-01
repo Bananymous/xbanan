@@ -75,21 +75,8 @@ void on_window_close_event(WINDOW wid)
 	}
 }
 
-void on_window_resize_event(WINDOW wid, uint32_t new_width, uint32_t new_height)
+static void send_window_configure(WINDOW wid, Object::Window& window)
 {
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-	auto& window = object.object.get<Object::Window>();
-
-	{
-		window.width  = new_width;
-		window.height = new_height;
-
-		MUST(window.pixels.resize(new_width * new_height));
-		for (auto& pixel : window.pixels)
-			pixel = window.background;
-	}
-
 	{
 		xEvent event = { .u = {
 			.configureNotify = {
@@ -129,10 +116,40 @@ void on_window_resize_event(WINDOW wid, uint32_t new_width, uint32_t new_height)
 		event.u.u.type = ConfigureNotify;
 		MUST(parent_window.send_event(event, SubstructureNotifyMask));
 	}
+}
+
+void on_window_resize_event(WINDOW wid, uint32_t new_width, uint32_t new_height)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+	auto& window = object.object.get<Object::Window>();
+
+	{
+		window.width  = new_width;
+		window.height = new_height;
+
+		MUST(window.pixels.resize(new_width * new_height));
+		for (auto& pixel : window.pixels)
+			pixel = window.background;
+	}
+
+	send_window_configure(wid, window);
 
 	send_exposure_recursive(wid);
 
 	invalidate_window(wid, 0, 0, window.width, window.height);
+}
+
+void on_window_move_event(WINDOW wid, int32_t x, int32_t y)
+{
+	auto& object = *g_objects[wid];
+	ASSERT(object.type == Object::Type::Window);
+	auto& window = object.object.get<Object::Window>();
+
+	window.x = x;
+	window.y = y;
+
+	send_window_configure(wid, window);
 }
 
 void on_window_focus_event(WINDOW wid, bool focused)
@@ -219,15 +236,14 @@ void on_window_fullscreen_event(WINDOW wid, bool is_fullscreen)
 
 static void send_key_button_pointer_event(WINDOW root_wid, BYTE detail, uint32_t event_mask, BYTE event_type, KeyButMask state)
 {
-	int32_t root_x, root_y;
 	int32_t event_x, event_y;
 
 	{
 		auto& object = *g_objects[root_wid];
 		ASSERT(object.type == Object::Type::Window);
 		auto& window = object.object.get<Object::Window>();
-		root_x = event_x = window.cursor_x;
-		root_y = event_y = window.cursor_y;
+		event_x = window.cursor_x;
+		event_y = window.cursor_y;
 	}
 
 	const auto child_wid = find_child_window(root_wid, event_x, event_y);
@@ -257,14 +273,15 @@ static void send_key_button_pointer_event(WINDOW root_wid, BYTE detail, uint32_t
 	ASSERT(object.type == Object::Type::Window);
 	auto& window = object.object.get<Object::Window>();
 
+	const auto [root_x, root_y] = get_window_position(wid);
 	xEvent event { .u = {
 		.keyButtonPointer = {
 			.time = static_cast<CARD32>(time(nullptr)),
 			.root = g_root.windowId,
 			.event = wid,
 			.child = static_cast<CARD32>(child_wid == wid ? None : child_wid),
-			.rootX = static_cast<INT16>(root_x),
-			.rootY = static_cast<INT16>(root_y),
+			.rootX = static_cast<INT16>(root_x + event_x),
+			.rootY = static_cast<INT16>(root_y + event_y),
 			.eventX = static_cast<INT16>(event_x),
 			.eventY = static_cast<INT16>(event_y),
 			.state = state,
@@ -389,14 +406,15 @@ static void send_enter_and_leave_events(WINDOW old_wid, int32_t old_x, int32_t o
 		ASSERT(object.type == Object::Type::Window);
 		auto& window = object.object.get<Object::Window>();
 
+		const auto [root_x, root_y] = get_window_position(wid);
 		xEvent event { .u = {
 			.enterLeave = {
 				.time = static_cast<CARD32>(time(nullptr)),
 				.root = g_root.windowId,
 				.event = wid,
 				.child = first ? static_cast<WINDOW>(None) : old_child_path.back(),
-				.rootX = static_cast<INT16>(old_x),
-				.rootY = static_cast<INT16>(old_y),
+				.rootX = static_cast<INT16>(root_x + old_x),
+				.rootY = static_cast<INT16>(root_y + old_y),
 				.eventX = static_cast<INT16>(old_x),
 				.eventY = static_cast<INT16>(old_y),
 				.state = static_cast<KeyButMask>(g_keymask | g_butmask),
@@ -429,14 +447,15 @@ static void send_enter_and_leave_events(WINDOW old_wid, int32_t old_x, int32_t o
 		ASSERT(object.type == Object::Type::Window);
 		auto& window = object.object.get<Object::Window>();
 
+		const auto [root_x, root_y] = get_window_position(wid);
 		xEvent event { .u = {
 			.enterLeave = {
 				.time = static_cast<CARD32>(time(nullptr)),
 				.root = g_root.windowId,
 				.event = wid,
 				.child = last ? static_cast<WINDOW>(None) : new_child_path.back(),
-				.rootX = static_cast<INT16>(new_x),
-				.rootY = static_cast<INT16>(new_y),
+				.rootX = static_cast<INT16>(root_x + new_x),
+				.rootY = static_cast<INT16>(root_y + new_y),
 				.eventX = static_cast<INT16>(new_x),
 				.eventY = static_cast<INT16>(new_y),
 				.state = static_cast<KeyButMask>(g_keymask | g_butmask),

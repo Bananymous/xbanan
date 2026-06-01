@@ -14,6 +14,8 @@ BAN::ErrorOr<void> destroy_window(Client& client_info, WINDOW wid);
 
 WINDOW find_child_window(WINDOW wid, int32_t& x, int32_t& y);
 
+xPoint get_window_position(WINDOW wid);
+
 static constexpr uint32_t COLOR_INVISIBLE = 0x69000000;
 
 extern CARD16 g_keymask;

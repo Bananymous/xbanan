@@ -24,15 +24,15 @@ endif()
 
 set(PLATFORM "banan-os" CACHE STRING "target platform")
 
-set(VALID_PLATFORMS "banan-os" "SDL2")
+set(VALID_PLATFORMS "banan-os" "SDL3")
 if(NOT PLATFORM IN_LIST VALID_PLATFORMS)
 	message(FATAL_ERROR "platform \"${PLATFORM}\" not known, valid platforms are ${VALID_PLATFORMS}")
 endif()
 
 if(PLATFORM STREQUAL "banan-os")
 	list(APPEND XBANAN_SOURCES banan-os/banan-os.cpp)
-elseif(PLATFORM STREQUAL "SDL2")
-	list(APPEND XBANAN_SOURCES SDL2/sdl2.cpp)
+elseif(PLATFORM STREQUAL "SDL3")
+	list(APPEND XBANAN_SOURCES SDL3/sdl3.cpp)
 endif()
 
 add_executable(xbanan ${XBANAN_SOURCES})
@@ -42,9 +42,9 @@ banan_link_library(xbanan libinput)
 
 if(PLATFORM STREQUAL "banan-os")
 	banan_link_library(xbanan libgui)
-elseif(PLATFORM STREQUAL "SDL2")
-	find_package(SDL2 REQUIRED)
-	banan_link_library(xbanan SDL2::SDL2)
+elseif(PLATFORM STREQUAL "SDL3")
+	find_package(SDL3 REQUIRED)
+	banan_link_library(xbanan SDL3::SDL3)
 endif()
 
 target_compile_options(xbanan PRIVATE -Wall -Wextra)

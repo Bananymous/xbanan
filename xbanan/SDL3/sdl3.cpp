@@ -4,7 +4,7 @@
 #include <BAN/Atomic.h>
 #include <BAN/HashMap.h>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <pthread.h>
 #include <sys/eventfd.h>
@@ -44,7 +44,7 @@ struct SDLCursor final : public PlatformCursor
 	~SDLCursor()
 	{
 		if (cursor != nullptr)
-			SDL_FreeCursor(cursor);
+			SDL_DestroyCursor(cursor);
 	}
 
 	SDL_Cursor* cursor { nullptr };
@@ -55,13 +55,13 @@ static int s_eventfd { -1 };
 struct Keymap
 {
 	consteval Keymap();
-	uint8_t map[SDL_NUM_SCANCODES];
+	uint8_t map[SDL_SCANCODE_COUNT];
 };
 static Keymap s_sdl_keymap;
 
 static SDL_Cursor* s_default_cursor { nullptr };
 
-static void* sdl2_thread(void*)
+static void* sdl3_thread(void*)
 {
 	for (;;)
 	{
@@ -73,22 +73,24 @@ static void* sdl2_thread(void*)
 	return nullptr;
 }
 
-static bool sdl2_initialize(uint32_t* display_w, uint32_t* display_h)
+static bool sdl3_initialize(uint32_t* display_w, uint32_t* display_h)
 {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == -1)
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
 	{
 		dwarnln("Could not initialize SDL: {}", SDL_GetError());
 		return false;
 	}
 
-	SDL_DisplayMode DM;
-	if (SDL_GetCurrentDisplayMode(0, &DM) == -1)
+	*display_w = *display_h = 0;
+
+	const SDL_DisplayID* display_ids = SDL_GetDisplays(nullptr);
+	for (int i = 0; display_ids[i]; i++)
 	{
-		dwarnln("Could not get display mode: {}", SDL_GetError());
-		return false;
+		SDL_Rect rect;
+		SDL_GetDisplayBounds(display_ids[i], &rect);
+		*display_w = BAN::Math::max<uint32_t>(*display_w, rect.x + rect.w);
+		*display_h = BAN::Math::max<uint32_t>(*display_h, rect.y + rect.h);
 	}
-	*display_w = DM.w;
-	*display_h = DM.h;
 
 	s_default_cursor = SDL_GetCursor();
 
@@ -102,12 +104,12 @@ static bool sdl2_initialize(uint32_t* display_w, uint32_t* display_h)
 	register_event_fd(s_eventfd, nullptr);
 
 	pthread_t thread;
-	pthread_create(&thread, nullptr, sdl2_thread, nullptr);
+	pthread_create(&thread, nullptr, sdl3_thread, nullptr);
 
 	return true;
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl2_create_window(PlatformWindow* parent, WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(PlatformWindow* parent, WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
 {
 	auto window = TRY(BAN::UniqPtr<SDLWindow>::create());
 
@@ -115,39 +117,37 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl2_create_window(PlatformWin
 	window->width = width;
 	window->height = height;
 
-	if (parent == nullptr)
-		x = y = SDL_WINDOWPOS_UNDEFINED;
-	else
-	{
-		auto& sdl_parent = *static_cast<SDLWindow*>(parent);
-		int parent_x, parent_y;
-		SDL_GetWindowPosition(sdl_parent.window, &parent_x, &parent_y);
-		x += parent_x;
-		y += parent_y;
-	}
-
 	int flags;
 	switch (type)
 	{
-		case WindowType::Popup:
-			flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_SKIP_TASKBAR | SDL_WINDOW_UTILITY;
-			break;
-		case WindowType::Utility:
-			flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_UTILITY;
-			break;
 		case WindowType::Normal:
+		case WindowType::Utility:
 			flags = SDL_WINDOW_RESIZABLE;
+			break;
+		case WindowType::Popup:
+			flags = SDL_WINDOW_BORDERLESS;
 			break;
 	}
 
-	window->window = SDL_CreateWindow("", x, y, width, height, flags);
+	if (parent == nullptr || type != WindowType::Popup)
+	{
+		if (type != WindowType::Normal)
+			flags |= SDL_WINDOW_UTILITY;
+		window->window = SDL_CreateWindow("", width, height, flags);
+	}
+	else
+	{
+		auto& sdl_parent = *static_cast<SDLWindow*>(parent);
+		window->window = SDL_CreatePopupWindow(sdl_parent.window, x, y, width, height, flags | SDL_WINDOW_POPUP_MENU);
+	}
+
 	if (window->window == nullptr)
 	{
 		dwarnln("Could not create SDL window: {}", SDL_GetError());
 		return BAN::Error::from_errno(EFAULT);
 	}
 
-	window->renderer = SDL_CreateRenderer(window->window, -1, SDL_RENDERER_ACCELERATED);
+	window->renderer = SDL_CreateRenderer(window->window, nullptr);
 	if (window->renderer == nullptr)
 	{
 		dwarnln("Could not create SDL renderer: {}", SDL_GetError());
@@ -166,13 +166,13 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl2_create_window(PlatformWin
 	return BAN::UniqPtr<PlatformWindow>(BAN::move(window));
 }
 
-static void sdl2_request_resize(PlatformWindow* window, uint32_t width, uint32_t height)
+static void sdl3_request_resize(PlatformWindow* window, uint32_t width, uint32_t height)
 {
 	auto& sdl_window = *static_cast<SDLWindow*>(window);
 	SDL_SetWindowSize(sdl_window.window, width, height);
 }
 
-static void sdl2_poll_events(void*)
+static void sdl3_poll_events(void*)
 {
 	uint64_t dummy;
 	read(s_eventfd, &dummy, sizeof(dummy));	
@@ -182,54 +182,44 @@ static void sdl2_poll_events(void*)
 	{
 		switch (event.type)
 		{
-			case SDL_WINDOWEVENT:
-			{
-				auto it = s_window_map.find(event.window.windowID);
-				if (it == s_window_map.end())
-					break;
-				auto& window = *it->value;
-				switch (event.window.event)
+			case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+				if (auto it = s_window_map.find(event.window.windowID); it != s_window_map.end())
+					on_window_close_event(it->value->wid);
+				break;
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+				if (auto it = s_window_map.find(event.window.windowID); it != s_window_map.end())
 				{
-					case SDL_WINDOWEVENT_CLOSE:
-						on_window_close_event(window.wid);
-						break;
-					case SDL_WINDOWEVENT_SIZE_CHANGED:
-						window.width  = event.window.data1;
-						window.height = event.window.data2;
+					auto& window = *it->value;
+					window.width  = event.window.data1;
+					window.height = event.window.data2;
 
-						SDL_DestroyTexture(window.texture);
-						window.texture = SDL_CreateTexture(window.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, window.width, window.height);
-						ASSERT(window.texture);
+					SDL_DestroyTexture(window.texture);
+					window.texture = SDL_CreateTexture(window.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, window.width, window.height);
+					ASSERT(window.texture);
 
-						on_window_resize_event(window.wid, event.window.data1, event.window.data2);
-						break;
-					case SDL_WINDOWEVENT_FOCUS_GAINED:
-						on_window_focus_event(window.wid, true);
-						break;
-					case SDL_WINDOWEVENT_FOCUS_LOST:
-						on_window_focus_event(window.wid, false);
-						break;
-					case SDL_WINDOWEVENT_MAXIMIZED:
-						on_window_fullscreen_event(window.wid, true);
-						break;
-					case SDL_WINDOWEVENT_RESTORED:
-						on_window_fullscreen_event(window.wid, false);
-						break;
-					case SDL_WINDOWEVENT_LEAVE:
-						on_window_leave_event(window.wid);
-						break;
+					on_window_resize_event(window.wid, window.width, window.height);
 				}
 				break;
-			}
-			case SDL_MOUSEMOTION:
-			{
-				auto it = s_window_map.find(event.window.windowID);
-				if (it != s_window_map.end())
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+			case SDL_EVENT_WINDOW_FOCUS_LOST:
+				if (auto it = s_window_map.find(event.motion.windowID); it != s_window_map.end())
+					on_window_focus_event(it->value->wid, (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED));
+				break;
+			case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+			case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+				if (auto it = s_window_map.find(event.motion.windowID); it != s_window_map.end())
+					on_window_fullscreen_event(it->value->wid, (event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN));
+				break;
+			case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+				if (auto it = s_window_map.find(event.motion.windowID); it != s_window_map.end())
+					on_window_leave_event(it->value->wid);
+				break;
+			case SDL_EVENT_MOUSE_MOTION:
+				if (auto it = s_window_map.find(event.motion.windowID); it != s_window_map.end())
 					on_mouse_move_event(it->value->wid, event.motion.x, event.motion.y);
 				break;
-			}
-			case SDL_MOUSEBUTTONUP:
-			case SDL_MOUSEBUTTONDOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 			{
 				uint8_t xbutton { 0 };
 				switch (event.button.button)
@@ -243,10 +233,10 @@ static void sdl2_poll_events(void*)
 
 				auto it = s_window_map.find(event.window.windowID);
 				if (xbutton && it != s_window_map.end())
-					on_mouse_button_event(it->value->wid, xbutton, (event.type == SDL_MOUSEBUTTONDOWN));
+					on_mouse_button_event(it->value->wid, xbutton, (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN));
 				break;
 			}
-			case SDL_MOUSEWHEEL:
+			case SDL_EVENT_MOUSE_WHEEL:
 			{
 				uint8_t xbutton { 0 };
 				if (event.wheel.y > 0)
@@ -263,31 +253,31 @@ static void sdl2_poll_events(void*)
 
 				break;
 			}
-			case SDL_KEYUP:
-			case SDL_KEYDOWN:
+			case SDL_EVENT_KEY_UP:
+			case SDL_EVENT_KEY_DOWN:
 			{
-				uint8_t scancode = s_sdl_keymap.map[event.key.keysym.scancode];
+				uint8_t scancode = s_sdl_keymap.map[event.key.scancode];
 
 				uint8_t xmod { 0 };
-				if (event.key.keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT))	
+				if (event.key.mod & SDL_KMOD_SHIFT)
 					xmod |= (1 << 0);
-				if (event.key.keysym.mod & (KMOD_CAPS))	
+				if (event.key.mod & SDL_KMOD_CAPS)
 					xmod |= (1 << 1);
-				if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))	
+				if (event.key.mod & SDL_KMOD_CTRL)
 					xmod |= (1 << 2);
-				if (event.key.keysym.mod & (KMOD_LALT | KMOD_RALT))	
+				if (event.key.mod & SDL_KMOD_ALT)
 					xmod |= (1 << 3);
 
 				auto it = s_window_map.find(event.window.windowID);
 				if (it != s_window_map.end())
-					on_key_event(it->value->wid, scancode, xmod, (event.type == SDL_KEYDOWN));
+					on_key_event(it->value->wid, scancode, xmod, (event.type == SDL_EVENT_KEY_DOWN));
 				break;
 			}
 		}
 	}
 }
 
-static void sdl2_invalidate(PlatformWindow* window, const uint32_t* src_pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+static void sdl3_invalidate(PlatformWindow* window, const uint32_t* src_pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
 	auto& sdl_window = *static_cast<SDLWindow*>(window);
 
@@ -303,7 +293,7 @@ static void sdl2_invalidate(PlatformWindow* window, const uint32_t* src_pixels, 
 
 	void* dst_pixels;
 	int dst_pitch;
-	if (SDL_LockTexture(sdl_window.texture, &rect, &dst_pixels, &dst_pitch) == -1)
+	if (!SDL_LockTexture(sdl_window.texture, &rect, &dst_pixels, &dst_pitch))
 	{
 		dwarnln("Could not lock texture: {}", SDL_GetError());
 		return;
@@ -321,63 +311,41 @@ static void sdl2_invalidate(PlatformWindow* window, const uint32_t* src_pixels, 
 	SDL_UnlockTexture(sdl_window.texture);
 
 	SDL_RenderClear(sdl_window.renderer);
-	SDL_RenderCopy(sdl_window.renderer, sdl_window.texture, NULL, NULL);
+	SDL_RenderTexture(sdl_window.renderer, sdl_window.texture, NULL, NULL);
 	SDL_RenderPresent(sdl_window.renderer);
 }
 
-static void sdl2_request_fullscreen(PlatformWindow* window, bool fullscreen)
+static void sdl3_request_fullscreen(PlatformWindow* window, bool fullscreen)
 {
 	auto& sdl_window = *static_cast<SDLWindow*>(window);
-	SDL_SetWindowFullscreen(sdl_window.window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+	SDL_SetWindowFullscreen(sdl_window.window, fullscreen);
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_system_cursor(SystemCursorType type)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl3_create_system_cursor(SystemCursorType type)
 {
-	SDL_SystemCursor sdl_type;
-	switch (type)
-	{
-		case SystemCursorType::Help:
-		case SystemCursorType::Pointer:
-			sdl_type = SDL_SYSTEM_CURSOR_ARROW;
-			break;
-		case SystemCursorType::Text:
-			sdl_type = SDL_SYSTEM_CURSOR_IBEAM;
-			break;
-		case SystemCursorType::Wait:
-			sdl_type = SDL_SYSTEM_CURSOR_WAIT;
-			break;
-		case SystemCursorType::Hand:
-			sdl_type = SDL_SYSTEM_CURSOR_HAND;
-			break;
-		case SystemCursorType::Move:
-			sdl_type = SDL_SYSTEM_CURSOR_SIZEALL;
-			break;
-		case SystemCursorType::Forbidden:
-			sdl_type = SDL_SYSTEM_CURSOR_NO;
-			break;
-		case SystemCursorType::ResizeN:
-		case SystemCursorType::ResizeS:
-		case SystemCursorType::ResizeVertical:
-			sdl_type = SDL_SYSTEM_CURSOR_SIZENS;
-			break;
-		case SystemCursorType::ResizeE:
-		case SystemCursorType::ResizeW:
-		case SystemCursorType::ResizeHorizontal:
-			sdl_type = SDL_SYSTEM_CURSOR_SIZEWE;
-			break;
-		case SystemCursorType::ResizeNW:
-		case SystemCursorType::ResizeSE:
-			sdl_type = SDL_SYSTEM_CURSOR_SIZENWSE;
-			break;
-		case SystemCursorType::ResizeNE:
-		case SystemCursorType::ResizeSW:
-			sdl_type = SDL_SYSTEM_CURSOR_SIZENESW;
-			break;
-	}
+	static constexpr SDL_SystemCursor cursor_type_map[] {
+		[static_cast<size_t>(SystemCursorType::Pointer)]          = SDL_SYSTEM_CURSOR_DEFAULT,
+		[static_cast<size_t>(SystemCursorType::Text)]             = SDL_SYSTEM_CURSOR_TEXT,
+		[static_cast<size_t>(SystemCursorType::Wait)]             = SDL_SYSTEM_CURSOR_WAIT,
+		[static_cast<size_t>(SystemCursorType::Hand)]             = SDL_SYSTEM_CURSOR_POINTER,
+		[static_cast<size_t>(SystemCursorType::Help)]             = SDL_SYSTEM_CURSOR_DEFAULT, // :(
+		[static_cast<size_t>(SystemCursorType::Move)]             = SDL_SYSTEM_CURSOR_MOVE,
+		[static_cast<size_t>(SystemCursorType::Forbidden)]        = SDL_SYSTEM_CURSOR_NOT_ALLOWED,
+		[static_cast<size_t>(SystemCursorType::ResizeN)]          = SDL_SYSTEM_CURSOR_N_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeE)]          = SDL_SYSTEM_CURSOR_E_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeS)]          = SDL_SYSTEM_CURSOR_S_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeW)]          = SDL_SYSTEM_CURSOR_W_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeNW)]         = SDL_SYSTEM_CURSOR_NW_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeNE)]         = SDL_SYSTEM_CURSOR_NE_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeSW)]         = SDL_SYSTEM_CURSOR_SW_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeSE)]         = SDL_SYSTEM_CURSOR_SE_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeVertical)]   = SDL_SYSTEM_CURSOR_NS_RESIZE,
+		[static_cast<size_t>(SystemCursorType::ResizeHorizontal)] = SDL_SYSTEM_CURSOR_EW_RESIZE,
+	};
 
 	auto cursor = TRY(BAN::UniqPtr<SDLCursor>::create());
 
-	cursor->cursor = SDL_CreateSystemCursor(sdl_type);
+	cursor->cursor = SDL_CreateSystemCursor(cursor_type_map[static_cast<size_t>(type)]);
 	if (cursor->cursor == nullptr)
 	{
 		dwarnln("Could not create SDL system cursor: {}", SDL_GetError());
@@ -387,11 +355,11 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_system_cursor(Syst
 	return BAN::UniqPtr<PlatformCursor>(BAN::move(cursor));
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_bitmap_cursor(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl3_create_bitmap_cursor(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
 {
 	auto cursor = TRY(BAN::UniqPtr<SDLCursor>::create());
 
-	SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormatFrom(const_cast<uint32_t*>(pixels), width, height, 32, width * 4, SDL_PIXELFORMAT_ARGB8888);
+	SDL_Surface* surface = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_ARGB8888, const_cast<uint32_t*>(pixels), width * 4);
 	if (surface == nullptr)
 	{
 		dwarnln("Could not create SDL surface for cursor: {}", SDL_GetError());
@@ -402,7 +370,7 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_bitmap_cursor(cons
 	origin_y = BAN::Math::clamp<int32_t>(origin_y, 0, height - 1);
 	cursor->cursor = SDL_CreateColorCursor(surface, origin_x, origin_y);
 
-	SDL_FreeSurface(surface);
+	SDL_DestroySurface(surface);
 
 	if (cursor->cursor == nullptr)
 	{
@@ -413,7 +381,7 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> sdl2_create_bitmap_cursor(cons
 	return BAN::UniqPtr<PlatformCursor>(BAN::move(cursor));
 }
 
-static void sdl2_set_cursor(PlatformWindow*, PlatformCursor* cursor)
+static void sdl3_set_cursor(PlatformWindow*, PlatformCursor* cursor)
 {
 	if (cursor == nullptr)
 		SDL_SetCursor(s_default_cursor);
@@ -425,15 +393,15 @@ static void sdl2_set_cursor(PlatformWindow*, PlatformCursor* cursor)
 }
 
 PlatformOps g_platform_ops = {
-	.initialize           = sdl2_initialize,
-	.poll_events          = sdl2_poll_events,
-	.create_window        = sdl2_create_window,
-	.invalidate           = sdl2_invalidate,
-	.request_resize       = sdl2_request_resize,
-	.request_fullscreen   = sdl2_request_fullscreen,
-	.create_system_cursor = sdl2_create_system_cursor,
-	.create_bitmap_cursor = sdl2_create_bitmap_cursor,
-	.set_cursor           = sdl2_set_cursor,
+	.initialize           = sdl3_initialize,
+	.poll_events          = sdl3_poll_events,
+	.create_window        = sdl3_create_window,
+	.invalidate           = sdl3_invalidate,
+	.request_resize       = sdl3_request_resize,
+	.request_fullscreen   = sdl3_request_fullscreen,
+	.create_system_cursor = sdl3_create_system_cursor,
+	.create_bitmap_cursor = sdl3_create_bitmap_cursor,
+	.set_cursor           = sdl3_set_cursor,
 };
 
 #include <LibInput/KeyEvent.h>

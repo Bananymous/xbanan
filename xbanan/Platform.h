@@ -16,9 +16,9 @@ struct PlatformCursor
 
 enum class WindowType
 {
-	Popup,
 	Normal,
 	Utility,
+	Popup,
 };
 
 enum class SystemCursorType

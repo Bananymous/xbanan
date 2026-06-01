@@ -450,7 +450,7 @@ void send_exposure_recursive(WINDOW wid)
 
 struct PlatformWindowInfo
 {
-	PlatformWindow* transient_for;
+	PlatformWindow* parent;
 	WindowType type;
 };
 
@@ -466,7 +466,7 @@ static PlatformWindowInfo get_plaform_window_info(const Object::Window& window)
 	static const CARD32 _NET_WM_WINDOW_TYPE_UTILITY       = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_UTILITY"_sv];
 
 	PlatformWindowInfo info {
-		.transient_for = nullptr,
+		.parent = nullptr,
 		.type = WindowType::Normal,
 	};
 
@@ -478,7 +478,7 @@ static PlatformWindowInfo get_plaform_window_info(const Object::Window& window)
 		const CARD32 type = *reinterpret_cast<const CARD32*>(it->value.data.data());
 		if (type == _NET_WM_WINDOW_TYPE_NORMAL)
 			info.type = WindowType::Normal;
-		else if (type == _NET_WM_WINDOW_TYPE_SPLASH || type == _NET_WM_WINDOW_TYPE_UTILITY || type == _NET_WM_WINDOW_TYPE_DIALOG)
+		else if (type == _NET_WM_WINDOW_TYPE_SPLASH || type == _NET_WM_WINDOW_TYPE_DIALOG)
 			info.type = WindowType::Utility;
 		else
 			info.type = WindowType::Popup;
@@ -500,7 +500,7 @@ wm_window_type_done:
 
 		// FIXME: support child windows
 		auto& window = it2->value->object.get<Object::Window>();
-		info.transient_for = window.platform_window.ptr();
+		info.parent = window.platform_window.ptr();
 	}
 transitient_for_done:
 
@@ -529,7 +529,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 
 		auto info = get_plaform_window_info(window);
 		window.platform_window = TRY(g_platform_ops.create_window(
-			info.transient_for,
+			info.parent,
 			info.type,
 			wid,
 			window.x,

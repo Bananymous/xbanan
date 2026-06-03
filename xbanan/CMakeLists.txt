@@ -6,6 +6,7 @@ set(XBANAN_SOURCES
 	Extensions.cpp
 	ExtBigReg.cpp
 	ExtRANDR.cpp
+	ExtXRes.cpp
 	Font.cpp
 	Image.cpp
 	Keymap.cpp

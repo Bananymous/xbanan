@@ -1,10 +1,10 @@
 #include "Base.h"
 #include "Definitions.h"
-#include "Keymap.h"
 
 #include <X11/X.h>
 #include <X11/Xatom.h>
 
+#include <locale.h>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -99,6 +99,8 @@ int g_server_grabber_fd = -1;
 
 int main()
 {
+	setlocale(LC_ALL, "");
+
 	for (int sig = 1; sig < NSIG; sig++)
 		if (sig != SIGWINCH)
 			signal(sig, exit);
@@ -258,8 +260,6 @@ int main()
 	APPEND_ATOM_CUSTOM(_NET_WM_WINDOW_TYPE_SPLASH);
 	APPEND_ATOM_CUSTOM(_NET_WM_WINDOW_TYPE_UTILITY);
 #undef APPEND_ATOM_CUSTOM
-
-	MUST(initialize_keymap());
 
 	uint32_t display_w, display_h;
 	if (!g_platform_ops.initialize(&display_w, &display_h))

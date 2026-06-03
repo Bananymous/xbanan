@@ -8,8 +8,6 @@
 #include "SafeGetters.h"
 #include "Utils.h"
 
-#include <LibInput/KeyEvent.h>
-
 #include <X11/X.h>
 #include <X11/Xatom.h>
 
@@ -2899,8 +2897,19 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  firstKeyCode: {}", request.firstKeyCode);
 			dprintln("  count:        {}", request.count);
 
-			ASSERT(g_keymap_min_keycode <= request.firstKeyCode);
-			ASSERT(g_keymap_max_keycode >= request.firstKeyCode + request.count - 1);
+			if (request.firstKeyCode < g_keymap_min_keycode || request.firstKeyCode + request.count - 1 > g_keymap_max_keycode)
+			{
+				xError error {
+					.type = X_Error,
+					.errorCode = BadValue,
+					.sequenceNumber = client_info.sequence,
+					.resourceID = 0, // TODO: should this be something meaningful?
+					.minorCode = 0,
+					.majorCode = opcode,
+				};
+				TRY(encode(client_info.output_buffer, error));
+				break;
+			}
 
 			xGetKeyboardMappingReply reply {
 				.type = X_Reply,
@@ -2909,10 +2918,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = static_cast<CARD32>(request.count * g_keymap_layers),
 			};
 			TRY(encode(client_info.output_buffer, reply));
-
-			for (size_t i = 0; i < request.count; i++)
-				for (size_t j = 0; j < g_keymap_layers; j++)
-					TRY(encode<CARD32>(client_info.output_buffer, g_keymap[request.firstKeyCode + i][j]));
+			TRY(encode(client_info.output_buffer, BAN::Span(
+				g_keymap + request.firstKeyCode - g_keymap_min_keycode,
+				request.count
+			)));
 
 			break;
 		}
@@ -2953,36 +2962,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			xGetModifierMappingReply reply {
 				.type = X_Reply,
-				.numKeyPerModifier = 2,
+				.numKeyPerModifier = g_modifier_layers,
 				.sequenceNumber = client_info.sequence,
-				.length = 4,
+				.length = 2 * g_modifier_layers,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-
-			using LibInput::keycode_normal;
-
-			// shift
-			TRY(encode(client_info.output_buffer, keycode_normal(3, 0)));  // lshift
-			TRY(encode(client_info.output_buffer, keycode_normal(3, 12))); // rshift
-
-			// lock
-			TRY(encode(client_info.output_buffer, keycode_normal(2, 0))); // caps lock
-			TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
-
-			// control
-			TRY(encode(client_info.output_buffer, keycode_normal(4, 0))); // lcrtl
-			TRY(encode(client_info.output_buffer, keycode_normal(4, 6))); // rctrl
-
-			// mod1
-			TRY(encode(client_info.output_buffer, keycode_normal(4, 2))); // lalt
-			TRY(encode(client_info.output_buffer, keycode_normal(4, 5))); // ralt
-
-			// mod2 -> mod5
-			for (size_t i = 2; i <= 5; i++)
-			{
-				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
-				TRY(encode(client_info.output_buffer, static_cast<uint8_t>(0)));
-			}
+			TRY(encode(client_info.output_buffer, g_modifier_map));
 
 			break;
 		}

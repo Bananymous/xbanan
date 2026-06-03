@@ -553,19 +553,16 @@ void on_mouse_button_event(WINDOW wid, uint8_t xbutton, bool pressed)
 void on_key_event(WINDOW wid, uint8_t scancode, uint8_t xmod, bool pressed)
 {
 	const uint8_t xkeycode = scancode + g_keymap_min_keycode;
-	if (xkeycode < g_keymap_min_keycode)
-	{
-		dwarnln("cannot send keycode {}", xkeycode);
+	if (xkeycode < g_keymap_min_keycode || xkeycode > g_keymap_max_keycode)
 		return;
-	}
 
 	{
-		const uint8_t byte = xkeycode / 8;
-		const uint8_t bit = xkeycode % 8;
+		const uint8_t byte =       xkeycode / 8;
+		const uint8_t mask = 1 << (xkeycode % 8);
 		if (pressed)
-			g_pressed_keys[byte] |= 1 << bit;
+			g_pressed_keys[byte] |= mask;
 		else
-			g_pressed_keys[byte] &= ~(1 << bit);
+			g_pressed_keys[byte] &= ~mask;
 	}
 
 	const auto old_state = g_keymask | g_butmask;
@@ -579,4 +576,27 @@ void on_key_event(WINDOW wid, uint8_t scancode, uint8_t xmod, bool pressed)
 		pressed ? KeyPress     : KeyRelease,
 		old_state
 	);
+}
+
+void on_keymap_changed()
+{
+	for (auto& [id, object] : g_objects)
+	{
+		if (object->type != Object::Type::Window)
+			continue;
+
+		auto& client_info = object->object.get<Object::Window>().owner;
+
+		xEvent event {};
+		event.u.u.type = MappingNotify;
+		event.u.u.sequenceNumber = client_info.sequence;
+
+		event.u.mappingNotify.request = MappingKeyboard,
+		event.u.mappingNotify.firstKeyCode = g_keymap_min_keycode,
+		event.u.mappingNotify.count = g_keymap_size,
+		MUST(encode(client_info.output_buffer, event));
+
+		event.u.mappingNotify.request = MappingModifier;
+		MUST(encode(client_info.output_buffer, event));
+	}
 }

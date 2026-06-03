@@ -15,3 +15,5 @@ void on_window_leave_event(WINDOW wid);
 void on_mouse_move_event(WINDOW wid, int32_t x, int32_t y);
 void on_mouse_button_event(WINDOW wid, uint8_t xbutton, bool pressed);
 void on_key_event(WINDOW wid, uint8_t scancode, uint8_t xmod, bool pressed);
+
+void on_keymap_changed();

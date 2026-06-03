@@ -1,4 +1,5 @@
 #include "../Events.h"
+#include "../Keymap.h"
 #include "../Platform.h"
 
 #include <BAN/Vector.h>
@@ -25,6 +26,8 @@ struct BananCursor final : public PlatformCursor
 	int32_t origin_y;
 };
 
+static BAN::ErrorOr<void> bananos_initialize_keymap();
+
 static bool bananos_initialize(uint32_t* display_w, uint32_t* display_h)
 {
 	auto attributes = LibGUI::Window::default_attributes;
@@ -39,6 +42,12 @@ static bool bananos_initialize(uint32_t* display_w, uint32_t* display_h)
 
 	*display_w = dummy_or_error.value()->width();
 	*display_h = dummy_or_error.value()->height();
+
+	if (auto ret = bananos_initialize_keymap(); ret.is_error())
+	{
+		dwarnln("Could not initialize keymap: {}", ret.error());
+		return false;
+	}
 
 	return true;
 }
@@ -103,7 +112,11 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(Platform
 			(event.shift()     ? (1 << 0) : 0) |
 			(event.caps_lock() ? (1 << 1) : 0) |
 			(event.ctrl()      ? (1 << 2) : 0) |
-			(event.alt()       ? (1 << 3) : 0);
+			(event.alt()       ? (1 << 3) : 0) |
+			(event.num_lock()  ? (1 << 4) : 0) |
+			// level5 shift
+			// super
+			(event.ralt()      ? (1 << 7) : 0); // FIXME: altgr
 		on_key_event(wid, event.scancode, xmod, event.pressed());
 	});
 
@@ -118,13 +131,6 @@ static void bananos_request_resize(PlatformWindow* window, uint32_t width, uint3
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
 	banan_window.window->request_resize(width, height);
-}
-
-static void bananos_request_reposition(PlatformWindow* window, int32_t x, int32_t y)
-{
-	(void)window;
-	(void)x;
-	(void)y;
 }
 
 static void bananos_invalidate(PlatformWindow* window, const uint32_t* pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
@@ -145,31 +151,6 @@ static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
 	banan_window.window->set_fullscreen(fullscreen);
-}
-
-static void bananos_warp_pointer(int32_t x, int32_t y, bool relative)
-{
-	(void)x;
-	(void)y;
-	(void)relative;
-}
-
-static void bananos_query_pointer(int32_t* x, int32_t* y)
-{
-	(void)x;
-	(void)y;
-}
-
-static void bananos_set_pointer_grab(PlatformWindow* window, bool grabbed)
-{
-	(void)window;
-	(void)grabbed;
-}
-
-static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_system_cursor(SystemCursorType type)
-{
-	(void)type;
-	return BAN::Error::from_errno(ENOTSUP);
 }
 
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_bitmap_cursor(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
@@ -207,12 +188,158 @@ PlatformOps g_platform_ops = {
 	.create_window        = bananos_create_window,
 	.invalidate           = bananos_invalidate,
 	.request_resize       = bananos_request_resize,
-	.request_reposition   = bananos_request_reposition,
+	.request_reposition   = nullptr,
 	.request_fullscreen   = bananos_request_fullscreen,
-	.warp_pointer         = bananos_warp_pointer,
-	.query_pointer        = nullptr, /* bananos_query_pointer */
-	.set_pointer_grab     = bananos_set_pointer_grab,
-	.create_system_cursor = bananos_create_system_cursor,
+	.warp_pointer         = nullptr,
+	.query_pointer        = nullptr,
+	.set_pointer_grab     = nullptr,
+	.create_system_cursor = nullptr,
 	.create_bitmap_cursor = bananos_create_bitmap_cursor,
 	.set_cursor           = bananos_set_cursor,
 };
+
+#include <LibInput/KeyboardLayout.h>
+#include <LibInput/KeyEvent.h>
+
+static uint32_t bananos_key_to_x_keysym(LibInput::Key, bool upper);
+
+static BAN::ErrorOr<void> bananos_initialize_keymap()
+{
+	// FIXME: get this from somewhere (gui command? enviroment? tmp file?)
+	const auto keymap_path = "./us.keymap"_sv;
+
+	TRY(LibInput::KeyboardLayout::initialize());
+
+	auto& keyboard_layout = LibInput::KeyboardLayout::get();
+	TRY(keyboard_layout.load_from_file(keymap_path));
+
+	const BAN::Span<const LibInput::Key> banan_keymaps[] {
+		keyboard_layout.keymap_normal(),
+		keyboard_layout.keymap_shift(),
+		keyboard_layout.keymap_altgr(),
+		keyboard_layout.keymap_altgr(), // add shift+altgr map?
+	};
+
+	for (size_t scancode = 0; scancode < g_keymap_size; scancode++)
+		for (size_t layer = 0; layer < g_keymap_layers; layer++)
+			if (const auto banan_key = banan_keymaps[layer][scancode]; banan_key != LibInput::Key::None)
+				g_keymap[scancode][layer] = bananos_key_to_x_keysym(banan_key, layer % 2);
+
+	using LibInput::keycode_normal;
+	using LibInput::keycode_numpad;
+
+	g_modifier_map[0][0] = keycode_normal(3,  0) + g_keymap_min_keycode; // lshift
+	g_modifier_map[0][1] = keycode_normal(3, 12) + g_keymap_min_keycode; // rshift
+
+	g_modifier_map[1][0] = keycode_normal(2,  0) + g_keymap_min_keycode; // caps lock
+
+	g_modifier_map[2][0] = keycode_normal(4,  0) + g_keymap_min_keycode; // lctrl
+	g_modifier_map[2][1] = keycode_normal(4,  6) + g_keymap_min_keycode; // rctrl
+
+	g_modifier_map[3][0] = keycode_normal(4,  2) + g_keymap_min_keycode; // lalt
+	g_modifier_map[3][1] = keycode_normal(4,  5) + g_keymap_min_keycode; // ralt
+
+	g_modifier_map[4][0] = keycode_numpad(0,  0) + g_keymap_min_keycode; // num lock
+
+	//g_modifier_map[5][0] = level5 shift;
+
+	g_modifier_map[6][0] = keycode_normal(4,  1) + g_keymap_min_keycode; // lsuper
+	g_modifier_map[6][1] = keycode_normal(4,  4) + g_keymap_min_keycode; // rsuper
+
+	g_modifier_map[7][0] = keycode_normal(4,  5) + g_keymap_min_keycode; // FIXME: altgr
+
+	return {};
+}
+
+#include <BAN/UTF8.h>
+
+#include <X11/keysym.h>
+#include <X11/XF86keysym.h>
+
+#include <wctype.h>
+
+static uint32_t bananos_key_to_x_keysym(LibInput::Key key, bool upper)
+{
+	using namespace LibInput;
+
+	if (const char* utf8 = key_to_utf8(key, upper ? KeyEvent::LShift : 0))
+	{
+		const uint32_t codepoint = BAN::UTF8::to_codepoint(utf8);
+		if (codepoint != BAN::UTF8::invalid && iswprint(codepoint))
+		{
+			if ((codepoint >= 0x20 && codepoint <= 0x7E) || (codepoint >= 0xA0 && codepoint <= 0xFF))
+				return codepoint;
+			return 0x01000000 | codepoint;
+		}
+	}
+
+	switch (key)
+	{
+		case Key::F1:             return XK_F1;
+		case Key::F2:             return XK_F2;
+		case Key::F3:             return XK_F3;
+		case Key::F4:             return XK_F4;
+		case Key::F5:             return XK_F5;
+		case Key::F6:             return XK_F6;
+		case Key::F7:             return XK_F7;
+		case Key::F8:             return XK_F8;
+		case Key::F9:             return XK_F9;
+		case Key::F10:            return XK_F10;
+		case Key::F11:            return XK_F11;
+		case Key::F12:            return XK_F12;
+		case Key::Insert:         return XK_Insert;
+		case Key::PrintScreen:    return XK_Print;
+		case Key::Delete:         return XK_Delete;
+		case Key::Home:           return XK_Home;
+		case Key::End:            return XK_End;
+		case Key::PageUp:         return XK_Page_Up;
+		case Key::PageDown:       return XK_Page_Down;
+		case Key::Enter:          return XK_Return;
+		case Key::Backspace:      return XK_BackSpace;
+		case Key::Escape:         return XK_Escape;
+		case Key::Tab:            return XK_Tab;
+		case Key::CapsLock:       return XK_Caps_Lock;
+		case Key::LeftShift:      return XK_Shift_L;
+		case Key::LeftCtrl:       return XK_Control_L;
+		case Key::Super:          return XK_Super_L;
+		case Key::LeftAlt:        return XK_Alt_L;
+		case Key::RightAlt:       return XK_Alt_R;
+		case Key::RightCtrl:      return XK_Control_R;
+		case Key::RightShift:     return XK_Shift_R;
+		case Key::ArrowUp:        return XK_Up;
+		case Key::ArrowDown:      return XK_Down;
+		case Key::ArrowLeft:      return XK_Left;
+		case Key::ArrowRight:     return XK_Right;
+		case Key::NumLock:        return XK_Num_Lock;
+		case Key::ScrollLock:     return XK_Scroll_Lock;
+		case Key::Numpad0:        return XK_KP_0;
+		case Key::Numpad1:        return XK_KP_1;
+		case Key::Numpad2:        return XK_KP_2;
+		case Key::Numpad3:        return XK_KP_3;
+		case Key::Numpad4:        return XK_KP_4;
+		case Key::Numpad5:        return XK_KP_5;
+		case Key::Numpad6:        return XK_KP_6;
+		case Key::Numpad7:        return XK_KP_7;
+		case Key::Numpad8:        return XK_KP_8;
+		case Key::Numpad9:        return XK_KP_9;
+		case Key::NumpadPlus:     return XK_KP_Add;
+		case Key::NumpadMinus:    return XK_KP_Subtract;
+		case Key::NumpadMultiply: return XK_KP_Multiply;
+		case Key::NumpadDivide:   return XK_KP_Divide;
+		case Key::NumpadEnter:    return XK_KP_Enter;
+		case Key::NumpadDecimal:  return XK_KP_Decimal;
+		case Key::VolumeMute:     return XF86XK_AudioMute;
+		case Key::VolumeUp:       return XF86XK_AudioRaiseVolume;
+		case Key::VolumeDown:     return XF86XK_AudioLowerVolume;
+		case Key::Calculator:     return XF86XK_Calculator;
+		case Key::MediaPlayPause: return XF86XK_AudioPlay;
+		case Key::MediaStop:      return XF86XK_AudioStop;
+		case Key::MediaPrevious:  return XF86XK_AudioPrev;
+		case Key::MediaNext:      return XF86XK_AudioNext;
+		default: break;
+	}
+
+	static_assert(static_cast<size_t>(Key::Count) == 145, "update keymap");
+
+	return 0;
+}

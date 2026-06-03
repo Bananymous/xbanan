@@ -1,4 +1,5 @@
 #include "../Events.h"
+#include "../Keymap.h"
 #include "../Platform.h"
 
 #include <BAN/Atomic.h>
@@ -52,13 +53,6 @@ struct SDLCursor final : public PlatformCursor
 
 static int s_eventfd { -1 };
 
-struct Keymap
-{
-	consteval Keymap();
-	uint8_t map[SDL_SCANCODE_COUNT];
-};
-static Keymap s_sdl_keymap;
-
 static SDL_Cursor* s_default_cursor { nullptr };
 
 static void* sdl3_thread(void*)
@@ -72,6 +66,8 @@ static void* sdl3_thread(void*)
 
 	return nullptr;
 }
+
+static void sdl3_initialize_keymap();
 
 static bool sdl3_initialize(uint32_t* display_w, uint32_t* display_h)
 {
@@ -91,6 +87,8 @@ static bool sdl3_initialize(uint32_t* display_w, uint32_t* display_h)
 		*display_w = BAN::Math::max<uint32_t>(*display_w, rect.x + rect.w);
 		*display_h = BAN::Math::max<uint32_t>(*display_h, rect.y + rect.h);
 	}
+
+	sdl3_initialize_keymap();
 
 	s_default_cursor = SDL_GetCursor();
 
@@ -270,23 +268,25 @@ static void sdl3_poll_events(void*)
 			case SDL_EVENT_KEY_UP:
 			case SDL_EVENT_KEY_DOWN:
 			{
-				uint8_t scancode = s_sdl_keymap.map[event.key.scancode];
-
-				uint8_t xmod { 0 };
-				if (event.key.mod & SDL_KMOD_SHIFT)
-					xmod |= (1 << 0);
-				if (event.key.mod & SDL_KMOD_CAPS)
-					xmod |= (1 << 1);
-				if (event.key.mod & SDL_KMOD_CTRL)
-					xmod |= (1 << 2);
-				if (event.key.mod & SDL_KMOD_ALT)
-					xmod |= (1 << 3);
+				const uint8_t xmod =
+					((event.key.mod & SDL_KMOD_SHIFT)  ? (1 << 0) : 0) |
+					((event.key.mod & SDL_KMOD_CAPS)   ? (1 << 1) : 0) |
+					((event.key.mod & SDL_KMOD_CTRL)   ? (1 << 2) : 0) |
+					((event.key.mod & SDL_KMOD_ALT)    ? (1 << 3) : 0) |
+					((event.key.mod & SDL_KMOD_NUM)    ? (1 << 4) : 0) |
+					((event.key.mod & SDL_KMOD_LEVEL5) ? (1 << 5) : 0) |
+					((event.key.mod & SDL_KMOD_GUI)    ? (1 << 6) : 0) |
+					((event.key.mod & SDL_KMOD_MODE)   ? (1 << 7) : 0);
 
 				auto it = s_window_map.find(event.window.windowID);
 				if (it != s_window_map.end())
-					on_key_event(it->value->wid, scancode, xmod, (event.type == SDL_EVENT_KEY_DOWN));
+					on_key_event(it->value->wid, event.key.scancode, xmod, (event.type == SDL_EVENT_KEY_DOWN));
 				break;
 			}
+			case SDL_EVENT_KEYMAP_CHANGED:
+				sdl3_initialize_keymap();
+				on_keymap_changed();
+				break;
 		}
 	}
 }
@@ -449,124 +449,255 @@ PlatformOps g_platform_ops = {
 	.set_cursor           = sdl3_set_cursor,
 };
 
-#include <LibInput/KeyEvent.h>
+static uint32_t sdl3_keycode_to_x_keysym(SDL_Keycode keycode);
 
-consteval Keymap::Keymap()
+static void sdl3_initialize_keymap()
 {
-	for (auto& scancode : map)
-		scancode = 0;
+	static constexpr SDL_Keymod modifier_map[] {
+		SDL_KMOD_NONE,
+		SDL_KMOD_SHIFT,
+		SDL_KMOD_MODE,
+		SDL_KMOD_MODE | SDL_KMOD_SHIFT,
+	};
 
-	using LibInput::keycode_normal;
-	using LibInput::keycode_function;
-	using LibInput::keycode_numpad;
+	memset(g_keymap,       0, sizeof(g_keymap));
+	memset(g_modifier_map, 0, sizeof(g_modifier_map));
 
-	map[SDL_SCANCODE_GRAVE]          = keycode_normal(0,  0);
-	map[SDL_SCANCODE_1]              = keycode_normal(0,  1);
-	map[SDL_SCANCODE_2]              = keycode_normal(0,  2);
-	map[SDL_SCANCODE_3]              = keycode_normal(0,  3);
-	map[SDL_SCANCODE_4]              = keycode_normal(0,  4);
-	map[SDL_SCANCODE_5]              = keycode_normal(0,  5);
-	map[SDL_SCANCODE_6]              = keycode_normal(0,  6);
-	map[SDL_SCANCODE_7]              = keycode_normal(0,  7);
-	map[SDL_SCANCODE_8]              = keycode_normal(0,  8);
-	map[SDL_SCANCODE_9]              = keycode_normal(0,  9);
-	map[SDL_SCANCODE_0]              = keycode_normal(0, 10);
-	map[SDL_SCANCODE_MINUS]          = keycode_normal(0, 11);
-	map[SDL_SCANCODE_EQUALS]         = keycode_normal(0, 12);
-	map[SDL_SCANCODE_BACKSPACE]      = keycode_normal(0, 13);
+	for (size_t scancode = 0; scancode < g_keymap_size; scancode++)
+		for (size_t layer = 0; layer < g_keymap_layers; layer++)
+			if (const auto sdl_key = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), modifier_map[layer], false); sdl_key != SDLK_UNKNOWN)
+				g_keymap[scancode][layer] = sdl3_keycode_to_x_keysym(sdl_key);
 
-	map[SDL_SCANCODE_TAB]            = keycode_normal(1,  0);
-	map[SDL_SCANCODE_Q]              = keycode_normal(1,  1);
-	map[SDL_SCANCODE_W]              = keycode_normal(1,  2);
-	map[SDL_SCANCODE_E]              = keycode_normal(1,  3);
-	map[SDL_SCANCODE_R]              = keycode_normal(1,  4);
-	map[SDL_SCANCODE_T]              = keycode_normal(1,  5);
-	map[SDL_SCANCODE_Y]              = keycode_normal(1,  6);
-	map[SDL_SCANCODE_U]              = keycode_normal(1,  7);
-	map[SDL_SCANCODE_I]              = keycode_normal(1,  8);
-	map[SDL_SCANCODE_O]              = keycode_normal(1,  9);
-	map[SDL_SCANCODE_P]              = keycode_normal(1, 10);
-	map[SDL_SCANCODE_LEFTBRACKET]    = keycode_normal(1, 11);
-	map[SDL_SCANCODE_RIGHTBRACKET]   = keycode_normal(1, 12);
+	const auto get_scancode = [](SDL_Keycode keycode) -> uint8_t {
+		const auto scancode = SDL_GetScancodeFromKey(keycode, nullptr);;
+		if (scancode != SDL_SCANCODE_UNKNOWN && scancode < g_keymap_size)
+			return scancode + g_keymap_min_keycode;
+		return 0;
+	};
 
-	map[SDL_SCANCODE_CAPSLOCK]       = keycode_normal(2,  0);
-	map[SDL_SCANCODE_A]              = keycode_normal(2,  1);
-	map[SDL_SCANCODE_S]              = keycode_normal(2,  2);
-	map[SDL_SCANCODE_D]              = keycode_normal(2,  3);
-	map[SDL_SCANCODE_F]              = keycode_normal(2,  4);
-	map[SDL_SCANCODE_G]              = keycode_normal(2,  5);
-	map[SDL_SCANCODE_H]              = keycode_normal(2,  6);
-	map[SDL_SCANCODE_J]              = keycode_normal(2,  7);
-	map[SDL_SCANCODE_K]              = keycode_normal(2,  8);
-	map[SDL_SCANCODE_L]              = keycode_normal(2,  9);
-	map[SDL_SCANCODE_SEMICOLON]      = keycode_normal(2, 10);
-	map[SDL_SCANCODE_APOSTROPHE]     = keycode_normal(2, 11);
-	map[SDL_SCANCODE_BACKSLASH]      = keycode_normal(2, 12);
-	map[SDL_SCANCODE_RETURN]         = keycode_normal(2, 13);
+	g_modifier_map[0][0] = get_scancode(SDLK_LSHIFT);
+	g_modifier_map[0][1] = get_scancode(SDLK_RSHIFT);
 
-	map[SDL_SCANCODE_LSHIFT]         = keycode_normal(3,  0);
-	map[SDL_SCANCODE_NONUSBACKSLASH] = keycode_normal(3,  1);
-	map[SDL_SCANCODE_Z]              = keycode_normal(3,  2);
-	map[SDL_SCANCODE_X]              = keycode_normal(3,  3);
-	map[SDL_SCANCODE_C]              = keycode_normal(3,  4);
-	map[SDL_SCANCODE_V]              = keycode_normal(3,  5);
-	map[SDL_SCANCODE_B]              = keycode_normal(3,  6);
-	map[SDL_SCANCODE_N]              = keycode_normal(3,  7);
-	map[SDL_SCANCODE_M]              = keycode_normal(3,  8);
-	map[SDL_SCANCODE_COMMA]          = keycode_normal(3,  9);
-	map[SDL_SCANCODE_PERIOD]         = keycode_normal(3, 10);
-	map[SDL_SCANCODE_SLASH]          = keycode_normal(3, 11);
-	map[SDL_SCANCODE_RSHIFT]         = keycode_normal(3, 12);
+	g_modifier_map[1][0] = get_scancode(SDLK_CAPSLOCK);
 
-	map[SDL_SCANCODE_LCTRL]          = keycode_normal(4, 0);
-	map[SDL_SCANCODE_LGUI]           = keycode_normal(4, 1);
-	map[SDL_SCANCODE_LALT]           = keycode_normal(4, 2);
-	map[SDL_SCANCODE_SPACE]          = keycode_normal(4, 3);
-	map[SDL_SCANCODE_RALT]           = keycode_normal(4, 4);
-	map[SDL_SCANCODE_RCTRL]          = keycode_normal(4, 5);
+	g_modifier_map[2][0] = get_scancode(SDLK_LCTRL);
+	g_modifier_map[2][1] = get_scancode(SDLK_RCTRL);
 
-	map[SDL_SCANCODE_UP]             = keycode_normal(5, 0);
-	map[SDL_SCANCODE_LEFT]           = keycode_normal(5, 1);
-	map[SDL_SCANCODE_DOWN]           = keycode_normal(5, 2);
-	map[SDL_SCANCODE_RIGHT]          = keycode_normal(5, 3);
+	g_modifier_map[3][0] = get_scancode(SDLK_LALT);
+	g_modifier_map[3][1] = get_scancode(SDLK_RALT);
 
-	map[SDL_SCANCODE_ESCAPE]         = keycode_function(0);
-	map[SDL_SCANCODE_F1]             = keycode_function(1);
-	map[SDL_SCANCODE_F2]             = keycode_function(2);
-	map[SDL_SCANCODE_F3]             = keycode_function(3);
-	map[SDL_SCANCODE_F4]             = keycode_function(4);
-	map[SDL_SCANCODE_F5]             = keycode_function(5);
-	map[SDL_SCANCODE_F6]             = keycode_function(6);
-	map[SDL_SCANCODE_F7]             = keycode_function(7);
-	map[SDL_SCANCODE_F8]             = keycode_function(8);
-	map[SDL_SCANCODE_F9]             = keycode_function(9);
-	map[SDL_SCANCODE_F10]            = keycode_function(10);
-	map[SDL_SCANCODE_F11]            = keycode_function(11);
-	map[SDL_SCANCODE_F12]            = keycode_function(12);
-	map[SDL_SCANCODE_INSERT]         = keycode_function(13);
-	map[SDL_SCANCODE_PRINTSCREEN]    = keycode_function(14);
-	map[SDL_SCANCODE_DELETE]         = keycode_function(15);
-	map[SDL_SCANCODE_HOME]           = keycode_function(16);
-	map[SDL_SCANCODE_END]            = keycode_function(17);
-	map[SDL_SCANCODE_PAGEUP]         = keycode_function(18);
-	map[SDL_SCANCODE_PAGEDOWN]       = keycode_function(19);
-	map[SDL_SCANCODE_SCROLLLOCK]     = keycode_function(20);
+	g_modifier_map[4][0] = get_scancode(SDLK_NUMLOCKCLEAR);
 
-	map[SDL_SCANCODE_NUMLOCKCLEAR]   = keycode_numpad(0, 0);
-	map[SDL_SCANCODE_KP_DIVIDE]      = keycode_numpad(0, 1);
-	map[SDL_SCANCODE_KP_MULTIPLY]    = keycode_numpad(0, 2);
-	map[SDL_SCANCODE_KP_MINUS]       = keycode_numpad(0, 3);
-	map[SDL_SCANCODE_KP_7]           = keycode_numpad(1, 0);
-	map[SDL_SCANCODE_KP_8]           = keycode_numpad(1, 1);
-	map[SDL_SCANCODE_KP_9]           = keycode_numpad(1, 2);
-	map[SDL_SCANCODE_KP_PLUS]        = keycode_numpad(1, 3);
-	map[SDL_SCANCODE_KP_4]           = keycode_numpad(2, 0);
-	map[SDL_SCANCODE_KP_5]           = keycode_numpad(2, 1);
-	map[SDL_SCANCODE_KP_6]           = keycode_numpad(2, 2);
-	map[SDL_SCANCODE_KP_1]           = keycode_numpad(3, 0);
-	map[SDL_SCANCODE_KP_2]           = keycode_numpad(3, 1);
-	map[SDL_SCANCODE_KP_3]           = keycode_numpad(3, 2);
-	map[SDL_SCANCODE_KP_ENTER]       = keycode_numpad(3, 3);
-	map[SDL_SCANCODE_KP_0]           = keycode_numpad(4, 0);
-	map[SDL_SCANCODE_KP_COMMA]       = keycode_numpad(4, 1);
-};
+	g_modifier_map[5][0] = get_scancode(SDLK_LEVEL5_SHIFT);
+
+	g_modifier_map[6][0] = get_scancode(SDLK_LGUI);
+	g_modifier_map[6][1] = get_scancode(SDLK_RGUI);
+
+	g_modifier_map[7][0] = get_scancode(SDLK_MODE);
+}
+
+#include <X11/keysym.h>
+#include <X11/XF86keysym.h>
+
+#include <wctype.h>
+
+static uint32_t sdl3_keycode_to_x_keysym(SDL_Keycode keycode)
+{
+	if (iswprint(keycode))
+	{
+		if ((keycode >= 0x20 && keycode <= 0x7E) || (keycode >= 0xA0 && keycode <= 0xFF))
+			return keycode;
+		return 0x01000000 | keycode;
+	}
+
+	switch (keycode)
+	{
+		case SDLK_RETURN:               return XK_Return;
+		case SDLK_ESCAPE:               return XK_Escape;
+		case SDLK_BACKSPACE:            return XK_BackSpace;
+		case SDLK_TAB:                  return XK_Tab;
+		case SDLK_DELETE:               return XK_Delete;
+		case SDLK_CAPSLOCK:             return XK_Caps_Lock;
+		case SDLK_F1:                   return XK_F1;
+		case SDLK_F2:                   return XK_F2;
+		case SDLK_F3:                   return XK_F3;
+		case SDLK_F4:                   return XK_F4;
+		case SDLK_F5:                   return XK_F5;
+		case SDLK_F6:                   return XK_F6;
+		case SDLK_F7:                   return XK_F7;
+		case SDLK_F8:                   return XK_F8;
+		case SDLK_F9:                   return XK_F9;
+		case SDLK_F10:                  return XK_F10;
+		case SDLK_F11:                  return XK_F11;
+		case SDLK_F12:                  return XK_F12;
+		case SDLK_PRINTSCREEN:          return XK_Print;
+		case SDLK_SCROLLLOCK:           return XK_Scroll_Lock;
+		case SDLK_PAUSE:                return XK_Pause;
+		case SDLK_INSERT:               return XK_Insert;
+		case SDLK_HOME:                 return XK_Home;
+		case SDLK_PAGEUP:               return XK_Page_Up;
+		case SDLK_END:                  return XK_End;
+		case SDLK_PAGEDOWN:             return XK_Page_Down;
+		case SDLK_RIGHT:                return XK_Right;
+		case SDLK_LEFT:                 return XK_Left;
+		case SDLK_DOWN:                 return XK_Down;
+		case SDLK_UP:                   return XK_Up;
+		case SDLK_NUMLOCKCLEAR:         return XK_Num_Lock;
+		case SDLK_KP_DIVIDE:            return XK_KP_Divide;
+		case SDLK_KP_MULTIPLY:          return XK_KP_Multiply;
+		case SDLK_KP_MINUS:             return XK_KP_Subtract;
+		case SDLK_KP_PLUS:              return XK_KP_Add;
+		case SDLK_KP_ENTER:             return XK_KP_Enter;
+		case SDLK_KP_1:                 return XK_KP_1;
+		case SDLK_KP_2:                 return XK_KP_2;
+		case SDLK_KP_3:                 return XK_KP_3;
+		case SDLK_KP_4:                 return XK_KP_4;
+		case SDLK_KP_5:                 return XK_KP_5;
+		case SDLK_KP_6:                 return XK_KP_6;
+		case SDLK_KP_7:                 return XK_KP_7;
+		case SDLK_KP_8:                 return XK_KP_8;
+		case SDLK_KP_9:                 return XK_KP_9;
+		case SDLK_KP_0:                 return XK_KP_0;
+		case SDLK_KP_PERIOD:            return XK_KP_Decimal;
+		case SDLK_APPLICATION:          return XF86XK_ApplicationLeft;
+		case SDLK_POWER:                return XF86XK_PowerOff;
+		case SDLK_KP_EQUALS:            return XK_KP_Equal;
+		case SDLK_F13:                  return XK_F13;
+		case SDLK_F14:                  return XK_F14;
+		case SDLK_F15:                  return XK_F15;
+		case SDLK_F16:                  return XK_F16;
+		case SDLK_F17:                  return XK_F17;
+		case SDLK_F18:                  return XK_F18;
+		case SDLK_F19:                  return XK_F19;
+		case SDLK_F20:                  return XK_F20;
+		case SDLK_F21:                  return XK_F21;
+		case SDLK_F22:                  return XK_F22;
+		case SDLK_F23:                  return XK_F23;
+		case SDLK_F24:                  return XK_F24;
+		case SDLK_EXECUTE:              return XK_Execute;
+		case SDLK_HELP:                 return XK_Help;
+		case SDLK_MENU:                 return XK_Menu;
+		case SDLK_SELECT:               return XK_Select;
+		case SDLK_STOP:                 return XF86XK_Stop;
+		case SDLK_AGAIN:                return XK_Redo;
+		case SDLK_UNDO:                 return XK_Undo;
+		case SDLK_CUT:                  return XF86XK_Cut;
+		case SDLK_COPY:                 return XF86XK_Copy;
+		case SDLK_PASTE:                return XF86XK_Paste;
+		case SDLK_FIND:                 return XK_Find;
+		case SDLK_MUTE:                 return XF86XK_AudioMute;
+		case SDLK_VOLUMEUP:             return XF86XK_AudioRaiseVolume;
+		case SDLK_VOLUMEDOWN:           return XF86XK_AudioLowerVolume;
+		case SDLK_KP_COMMA:             return XK_KP_Separator;
+		//case SDLK_KP_EQUALSAS400:       return ;
+		//case SDLK_ALTERASE:             return ;
+		case SDLK_SYSREQ:               return XK_Sys_Req;
+		case SDLK_CANCEL:               return XK_Cancel;
+		case SDLK_CLEAR:                return XK_Clear;
+		case SDLK_PRIOR:                return XK_Prior;
+		case SDLK_RETURN2:              return XK_Return;
+		//case SDLK_SEPARATOR:            return ;
+		//case SDLK_OUT:                  return ;
+		//case SDLK_OPER:                 return ;
+		//case SDLK_CLEARAGAIN:           return ;
+		//case SDLK_CRSEL:                return ;
+		//case SDLK_EXSEL:                return ;
+		//case SDLK_KP_00:                return ;
+		//case SDLK_KP_000:               return ;
+		//case SDLK_THOUSANDSSEPARATOR:   return ;
+		//case SDLK_DECIMALSEPARATOR:     return ;
+		//case SDLK_CURRENCYUNIT:         return ;
+		//case SDLK_CURRENCYSUBUNIT:      return ;
+		//case SDLK_KP_LEFTPAREN:         return ;
+		//case SDLK_KP_RIGHTPAREN:        return ;
+		//case SDLK_KP_LEFTBRACE:         return ;
+		//case SDLK_KP_RIGHTBRACE:        return ;
+		case SDLK_KP_TAB:               return XK_KP_Tab;
+		//case SDLK_KP_BACKSPACE:         return ;
+		//case SDLK_KP_A:                 return ;
+		//case SDLK_KP_B:                 return ;
+		//case SDLK_KP_C:                 return ;
+		//case SDLK_KP_D:                 return ;
+		//case SDLK_KP_E:                 return ;
+		//case SDLK_KP_F:                 return ;
+		//case SDLK_KP_XOR:               return ;
+		//case SDLK_KP_POWER:             return ;
+		//case SDLK_KP_PERCENT:           return ;
+		//case SDLK_KP_LESS:              return ;
+		//case SDLK_KP_GREATER:           return ;
+		//case SDLK_KP_AMPERSAND:         return ;
+		//case SDLK_KP_DBLAMPERSAND:      return ;
+		//case SDLK_KP_VERTICALBAR:       return ;
+		//case SDLK_KP_DBLVERTICALBAR:    return ;
+		//case SDLK_KP_COLON:             return ;
+		//case SDLK_KP_HASH:              return ;
+		//case SDLK_KP_SPACE:             return ;
+		//case SDLK_KP_AT:                return ;
+		//case SDLK_KP_EXCLAM:            return ;
+		//case SDLK_KP_MEMSTORE:          return ;
+		//case SDLK_KP_MEMRECALL:         return ;
+		//case SDLK_KP_MEMCLEAR:          return ;
+		//case SDLK_KP_MEMADD:            return ;
+		//case SDLK_KP_MEMSUBTRACT:       return ;
+		//case SDLK_KP_MEMMULTIPLY:       return ;
+		//case SDLK_KP_MEMDIVIDE:         return ;
+		//case SDLK_KP_PLUSMINUS:         return ;
+		//case SDLK_KP_CLEAR:             return ;
+		//case SDLK_KP_CLEARENTRY:        return ;
+		//case SDLK_KP_BINARY:            return ;
+		//case SDLK_KP_OCTAL:             return ;
+		//case SDLK_KP_DECIMAL:           return ;
+		//case SDLK_KP_HEXADECIMAL:       return ;
+		case SDLK_LCTRL:                return XK_Control_L;
+		case SDLK_LSHIFT:               return XK_Shift_L;
+		case SDLK_LALT:                 return XK_Alt_L;
+		case SDLK_LGUI:                 return XK_Super_L;
+		case SDLK_RCTRL:                return XK_Control_R;
+		case SDLK_RSHIFT:               return XK_Shift_R;
+		case SDLK_RALT:                 return XK_Alt_R;
+		case SDLK_RGUI:                 return XK_Super_R;
+		case SDLK_MODE:                 return XK_Mode_switch;
+		case SDLK_SLEEP:                return XF86XK_Sleep;
+		case SDLK_WAKE:                 return XF86XK_WakeUp;
+		//case SDLK_CHANNEL_INCREMENT:    return XF86XK_ChannelUp;
+		//case SDLK_CHANNEL_DECREMENT:    return XF86XK_ChannelDown;
+		case SDLK_MEDIA_PLAY:           return XF86XK_AudioPlay;
+		case SDLK_MEDIA_PAUSE:          return XF86XK_AudioPause;
+		case SDLK_MEDIA_RECORD:         return XF86XK_AudioRecord;
+		case SDLK_MEDIA_FAST_FORWARD:   return XF86XK_AudioForward;
+		case SDLK_MEDIA_REWIND:         return XF86XK_AudioRewind;
+		case SDLK_MEDIA_NEXT_TRACK:     return XF86XK_AudioNext;
+		case SDLK_MEDIA_PREVIOUS_TRACK: return XF86XK_AudioPrev;
+		case SDLK_MEDIA_STOP:           return XF86XK_AudioStop;
+		case SDLK_MEDIA_EJECT:          return XF86XK_Eject;
+		//case SDLK_MEDIA_PLAY_PAUSE:     return XF86XK_MediaPlayPause;
+		case SDLK_MEDIA_SELECT:         return XF86XK_AudioMedia;
+		case SDLK_AC_NEW:               return XF86XK_New;
+		case SDLK_AC_OPEN:              return XF86XK_Open;
+		case SDLK_AC_CLOSE:             return XF86XK_Close;
+		//case SDLK_AC_EXIT:              return XF86XK_Exit;
+		case SDLK_AC_SAVE:              return XF86XK_Save;
+		case SDLK_AC_PRINT:             return XK_Print;
+		//case SDLK_AC_PROPERTIES:        return ;
+		case SDLK_AC_SEARCH:            return XF86XK_Search;
+		case SDLK_AC_HOME:              return XF86XK_HomePage; // ?
+		case SDLK_AC_BACK:              return XF86XK_Back;
+		case SDLK_AC_FORWARD:           return XF86XK_Forward;
+		case SDLK_AC_STOP:              return XF86XK_Stop;
+		case SDLK_AC_REFRESH:           return XF86XK_Refresh;
+		case SDLK_AC_BOOKMARKS:         return XF86XK_Book; // ?
+		//case SDLK_SOFTLEFT:             return ;
+		//case SDLK_SOFTRIGHT:            return ;
+		//case SDLK_CALL:                 return ;
+		//case SDLK_ENDCALL:              return ;
+		case SDLK_LEFT_TAB:             return XK_ISO_Left_Tab;
+		case SDLK_LEVEL5_SHIFT:         return XK_ISO_Level5_Shift;
+		case SDLK_MULTI_KEY_COMPOSE:    return XK_Multi_key;
+		case SDLK_LMETA:                return XK_Meta_L;
+		case SDLK_RMETA:                return XK_Meta_R;
+		case SDLK_LHYPER:               return XK_Hyper_L;
+		case SDLK_RHYPER:               return XK_Hyper_R;
+	}
+
+	return 0;
+}

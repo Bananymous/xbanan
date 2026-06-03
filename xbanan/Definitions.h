@@ -143,6 +143,7 @@ struct Client
 	bool has_epollout { false };
 	bool has_bigrequests { false };
 	CARD16 sequence { 0 };
+	BAN::Optional<uint32_t> pid;
 	BAN::Vector<uint8_t> input_buffer;
 	BAN::Vector<uint8_t> output_buffer;
 	BAN::HashSet<CARD32> objects;

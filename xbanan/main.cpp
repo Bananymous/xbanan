@@ -391,11 +391,21 @@ int main()
 					continue;
 				}
 
+				BAN::Optional<uint32_t> client_pid;
+
+#ifdef SO_PEERCRED
+				ucred client_cred;
+				socklen_t client_cred_len = sizeof(client_cred);
+				if (getsockopt(client_sock, SOL_SOCKET, SO_PEERCRED, &client_cred, &client_cred_len) == 0)
+					client_pid = client_cred.pid;
+#endif
+
 				MUST(g_epoll_thingies.insert(client_sock, {
 					.type = EpollThingy::Type::Client,
 					.value = Client {
 						.fd = client_sock,
 						.state = Client::State::ConnectionSetup,
+						.pid = client_pid,
 					}
 				}));
 

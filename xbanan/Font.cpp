@@ -385,7 +385,7 @@ static BAN::ErrorOr<BAN::RefPtr<PCFFont>> parse_font(const BAN::String& path)
 	font->font_ascent  = font->max_bounds.ascent;
 	font->font_descent = font->max_bounds.descent;
 
-	font->is_cursor_font = (path == "fonts/misc/cursor.pcf.gz"_sv);
+	font->is_cursor_font = (path == FONT_PATH "/misc/cursor.pcf.gz"_sv);
 
 	return font;
 }
@@ -393,7 +393,7 @@ static BAN::ErrorOr<BAN::RefPtr<PCFFont>> parse_font(const BAN::String& path)
 __attribute__((constructor))
 static void initialize_fonts()
 {
-	const char* font_path = "fonts/misc";
+	const char* font_path = FONT_PATH "/misc";
 
 	do
 	{

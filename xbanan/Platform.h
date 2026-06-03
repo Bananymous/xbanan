@@ -42,7 +42,8 @@ enum class SystemCursorType
 	ResizeHorizontal,
 };
 
-// initialize, poll_events, create_window and invalidate are required
+// initialize, create_window and invalidate are required
+// poll_events is required when an event fd is registered
 struct PlatformOps
 {
 	/* Do platform initialization */

@@ -13,6 +13,8 @@ set(XBANAN_SOURCES
 	SafeGetters.cpp
 )
 
+set(FONT_PATH ${CMAKE_SOURCE_DIR}/fonts CACHE STRING "path to X11 fonts")
+
 option(ENABLE_GLX "enable glx extension" ON)
 if(ENABLE_GLX)
 	list(APPEND XBANAN_SOURCES ExtGLX.cpp)
@@ -21,13 +23,6 @@ endif()
 option(ENABLE_SHM "enable shm extension" ON)
 if(ENABLE_SHM)
 	list(APPEND XBANAN_SOURCES ExtSHM.cpp)
-endif()
-
-set(PLATFORM "banan-os" CACHE STRING "target platform")
-
-set(VALID_PLATFORMS "banan-os" "SDL3")
-if(NOT PLATFORM IN_LIST VALID_PLATFORMS)
-	message(FATAL_ERROR "platform \"${PLATFORM}\" not known, valid platforms are ${VALID_PLATFORMS}")
 endif()
 
 if(PLATFORM STREQUAL "banan-os")
@@ -39,6 +34,8 @@ endif()
 add_executable(xbanan ${XBANAN_SOURCES})
 banan_link_library(xbanan ban)
 banan_link_library(xbanan libdeflate)
+
+target_compile_definitions(xbanan PRIVATE FONT_PATH="${FONT_PATH}")
 
 if(PLATFORM STREQUAL "banan-os")
 	banan_link_library(xbanan libgui)
@@ -55,8 +52,5 @@ target_compile_options(xbanan PRIVATE
 	-Wno-unused-variable
 	-Wno-unused-but-set-variable
 )
-
-#target_compile_options(xbanan PRIVATE -fsanitize=address)
-#target_link_options(xbanan PRIVATE -fsanitize=address)
 
 install(TARGETS xbanan OPTIONAL)

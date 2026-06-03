@@ -206,12 +206,12 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 	};
 	TRY(encode(client_info.output_buffer, setup_prefix));
 
-	ASSERT((client_info.fd >> 24) == 0);
+	ASSERT((client_info.fd >> 20) == 0);
 
 	xConnSetup setup {
 		.release = 0,
-		.ridBase = static_cast<CARD32>(client_info.fd << 24),
-		.ridMask = 0x00FFFFFF,
+		.ridBase = static_cast<CARD32>(client_info.fd << 20),
+		.ridMask = 0x000FFFFF,
 		.motionBufferSize = 0,
 		.nbytesVendor = 8,
 		.maxRequestSize = 0xFFFF,

@@ -7,23 +7,18 @@
 #include <X11/Xatom.h>
 
 #include <time.h>
-#include <sys/epoll.h>
 
 void register_event_fd(int fd, void* data)
 {
-	epoll_event event { .events = EPOLLIN, .data = { .fd = fd } };
-	epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, fd, &event);
-
-	MUST(g_epoll_thingies.insert(fd, {
-		.type = EpollThingy::Type::Event,
+	MUST(g_pollables.insert(fd, {
+		.type = Pollable::Type::Event,
 		.value = data,
 	}));
 }
 
 void unregister_event_fd(int fd)
 {
-	epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
-	g_epoll_thingies.remove(fd);
+	g_pollables.remove(fd);
 }
 
 void on_window_close_event(WINDOW wid)

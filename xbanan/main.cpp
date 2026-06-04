@@ -5,8 +5,8 @@
 #include <X11/Xatom.h>
 
 #include <locale.h>
+#include <poll.h>
 #include <signal.h>
-#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -92,8 +92,7 @@ BAN::HashMap<BAN::String, ATOM> g_atoms_name_to_id;
 BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
 ATOM g_atom_value = XA_LAST_PREDEFINED + 1;
 
-int g_epoll_fd;
-BAN::HashMap<int, EpollThingy> g_epoll_thingies;
+BAN::HashMap<int, Pollable> g_pollables;
 
 int g_server_grabber_fd = -1;
 
@@ -153,22 +152,6 @@ int main()
 	{
 		perror("xbanan: listen");
 		return 1;
-	}
-
-	g_epoll_fd = epoll_create1(0);
-	if (g_epoll_fd == -1)
-	{
-		perror("xbanan: epoll_create1");
-		return 1;
-	}
-
-	{
-		epoll_event event { .events = EPOLLIN, .data = { .ptr = nullptr } };
-		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, server_sock, &event) == -1)
-		{
-			perror("xbanan: epoll_ctl");
-			return 1;
-		}
 	}
 
 #define APPEND_ATOM(name) do { \
@@ -274,9 +257,9 @@ int main()
 	const auto close_client =
 		[](int client_fd)
 		{
-			auto& epoll_thingy = g_epoll_thingies[client_fd];
-			ASSERT(epoll_thingy.type == EpollThingy::Type::Client);
-			auto& client_info = epoll_thingy.value.get<Client>();
+			auto& pollable = g_pollables[client_fd];
+			ASSERT(pollable.type == Pollable::Type::Client);
+			auto& client_info = pollable.value.get<Client>();
 
 			dprintln("client {} disconnected", client_fd);
 
@@ -328,29 +311,11 @@ int main()
 				g_objects.remove(it);
 			}
 
-			epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
-			g_epoll_thingies.remove(client_fd);
+			g_pollables.remove(client_fd);
 			close(client_fd);
 
-			if (client_fd == g_server_grabber_fd)
-			{
+			if (g_server_grabber_fd == client_fd)
 				g_server_grabber_fd = -1;
-
-				for (const auto& [_, thingy] : g_epoll_thingies)
-				{
-					if (thingy.type != EpollThingy::Type::Client)
-						continue;
-
-					auto& other_client = thingy.value.get<Client>();
-
-					uint32_t events = EPOLLIN;
-					if (other_client.has_epollout)
-						events |= EPOLLOUT;
-
-					epoll_event event { .events = events, .data = { .fd = other_client.fd } };
-					epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
-				}
-			}
 		};
 
 	Client dummy_client {};
@@ -377,12 +342,37 @@ int main()
 
 	for (;;)
 	{
-		epoll_event events[16];
-		const int event_count = epoll_wait(g_epoll_fd, events, 16, -1);
-
-		for (int i = 0; i < event_count; i++)
+		BAN::Vector<pollfd> pollfds;
+		MUST(pollfds.reserve(g_pollables.size() + 1));
+		MUST(pollfds.push_back({
+			.fd = server_sock,
+			.events = POLLIN,
+			.revents = 0,
+		}));
+		for (auto& [fd, pollable] : g_pollables)
 		{
-			if (events[i].data.ptr == nullptr)
+			short events = 0;
+			if (g_server_grabber_fd == -1 || g_server_grabber_fd == fd)
+				events |= POLLIN;
+			if (pollable.type == Pollable::Type::Client && !pollable.value.get<Client>().output_buffer.empty())
+				events |= POLLOUT;
+			if (events == 0)
+				continue;
+			MUST(pollfds.push_back(pollfd {
+				.fd = fd,
+				.events = events,
+				.revents = 0,
+			}));
+		}
+
+		const int event_count = poll(pollfds.data(), pollfds.size(), -1);
+
+		for (const auto& pollfd : pollfds)
+		{
+			if (pollfd.revents == 0)
+				continue;
+
+			if (pollfd.fd == server_sock)
 			{
 				int client_sock = accept(server_sock, nullptr, nullptr);
 				if (client_sock == -1)
@@ -400,8 +390,8 @@ int main()
 					client_pid = client_cred.pid;
 #endif
 
-				MUST(g_epoll_thingies.insert(client_sock, {
-					.type = EpollThingy::Type::Client,
+				MUST(g_pollables.insert(client_sock, {
+					.type = Pollable::Type::Client,
 					.value = Client {
 						.fd = client_sock,
 						.state = Client::State::ConnectionSetup,
@@ -409,44 +399,32 @@ int main()
 					}
 				}));
 
-				uint32_t events = 0;
-				if (g_server_grabber_fd == -1)
-					events |= EPOLLIN;
-
-				epoll_event event = { .events = events, .data = { .fd = client_sock } };
-				if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, client_sock, &event) == -1)
-				{
-					perror("xbanan: epoll_ctl");
-					close(client_sock);
-					continue;
-				}
-
 				dprintln("client {} connected", client_sock);
 				continue;
 			}
 
-			auto it = g_epoll_thingies.find(events[i].data.fd);
-			if (it == g_epoll_thingies.end())
+			auto it = g_pollables.find(pollfd.fd);
+			if (it == g_pollables.end())
 				continue;
-			auto& epoll_thingy = it->value;
+			auto& pollable = it->value;
 
-			if (epoll_thingy.type == EpollThingy::Type::Event)
+			if (pollable.type == Pollable::Type::Event)
 			{
-				g_platform_ops.poll_events(epoll_thingy.value.get<void*>());
+				g_platform_ops.poll_events(pollable.value.get<void*>());
 				continue;
 			}
 
-			ASSERT(epoll_thingy.type == EpollThingy::Type::Client);
+			ASSERT(pollable.type == Pollable::Type::Client);
 
-			auto& client_info = epoll_thingy.value.get<Client>();
+			auto& client_info = pollable.value.get<Client>();
 
-			if (events[i].events & EPOLLHUP)
+			if (pollfd.revents & POLLHUP)
 			{
 				close_client(client_info.fd);
 				continue;
 			}
 
-			if (events[i].events & EPOLLOUT)
+			if (pollfd.revents & POLLOUT)
 			{
 				const ssize_t nsend = send(
 					client_info.fd,
@@ -473,28 +451,11 @@ int main()
 				);
 				MUST(client_info.output_buffer.resize(client_info.output_buffer.size() - nsend));
 
-				if (client_info.output_buffer.empty())
-				{
-					uint32_t events = 0;
-					if (g_server_grabber_fd == -1 || g_server_grabber_fd == client_info.fd)
-						events |= EPOLLIN;
-
-					epoll_event event { .events = events, .data = { .fd = client_info.fd } };
-					if (epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
-					{
-						perror("xbanan: epoll_ctl");
-						close_client(client_info.fd);
-						continue;
-					}
-
-					client_info.has_epollout = false;
-				}
-
 			send_done:
 				(void)0;
 			}
 
-			if (!(events[i].events & EPOLLIN))
+			if (!(pollfd.revents & POLLIN))
 				continue;
 
 			if (g_server_grabber_fd != -1 && g_server_grabber_fd != client_info.fd)
@@ -605,31 +566,6 @@ int main()
 					break;
 				}
 			}
-		}
-
-	iterator_invalidated:
-		for (auto& [_, thingy] : g_epoll_thingies)
-		{
-			if (thingy.type != EpollThingy::Type::Client)
-				continue;
-
-			auto& client_info = thingy.value.get<Client>();
-			if (client_info.output_buffer.empty() || client_info.has_epollout)
-				continue;
-
-			uint32_t events = EPOLLOUT;
-			if (g_server_grabber_fd == -1 || g_server_grabber_fd == client_info.fd)
-				events |= EPOLLIN;
-
-			epoll_event event { .events = events, .data = { .fd = client_info.fd } };
-			if (epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
-			{
-				perror("xbanan: epoll_ctl");
-				close_client(client_info.fd);
-				goto iterator_invalidated;
-			}
-
-			client_info.has_epollout = true;
 		}
 	}
 }

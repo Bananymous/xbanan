@@ -7,9 +7,9 @@
 template<typename F>
 static BAN::ErrorOr<void> for_each_client(uint32_t target_spec, const F& callback)
 {
-	for (auto [fd, thingy] : g_epoll_thingies)
+	for (auto [fd, thingy] : g_pollables)
 	{
-		if (thingy.type != EpollThingy::Type::Client)
+		if (thingy.type != Pollable::Type::Client)
 			continue;
 
 		Client& client_info = thingy.value.get<Client>();

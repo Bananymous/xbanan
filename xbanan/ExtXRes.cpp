@@ -33,8 +33,8 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 			auto request = decode<xXResQueryVersionReq>(packet).value();
 
 			dprintln("XResQueryVersion");
-			dprintln("  clientMajor: {}", reqType.client_major);
-			dprintln("  clientMinor: {}", reqType.client_minor);
+			dprintln("  clientMajor: {}", request.client_major);
+			dprintln("  clientMinor: {}", request.client_minor);
    
 			xXResQueryVersionReply reply {
 				.type = X_Reply,

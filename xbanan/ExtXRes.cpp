@@ -7,12 +7,12 @@
 template<typename F>
 static BAN::ErrorOr<void> for_each_client(uint32_t target_spec, const F& callback)
 {
-	for (auto [fd, thingy] : g_epoll_thingies)
+	for (const auto& [fd, thingy] : g_epoll_thingies)
 	{
 		if (thingy.type != EpollThingy::Type::Client)
 			continue;
 
-		Client& client_info = thingy.value.get<Client>();
+		const auto& client_info = thingy.value.get<Client>();
 		if (target_spec && (target_spec >> 20) != client_info.fd)
 			continue;
 
@@ -61,7 +61,7 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 			{
 				auto spec = decode<xXResClientIdSpec>(packet).value();
 
-				TRY(for_each_client(spec.client, [&](Client& client_info, uint32_t client_spec) -> BAN::ErrorOr<void> {
+				TRY(for_each_client(spec.client, [&](const Client& client_info, uint32_t client_spec) -> BAN::ErrorOr<void> {
 					if (spec.mask == None || (spec.mask & X_XResClientXIDMask))
 					{
 						xXResClientIdValue value {

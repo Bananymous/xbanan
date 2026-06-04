@@ -69,7 +69,7 @@ static void* sdl3_thread(void*)
 
 static void sdl3_initialize_keymap();
 
-static bool sdl3_initialize(uint32_t* display_w, uint32_t* display_h)
+static bool sdl3_initialize()
 {
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
 	{
@@ -77,15 +77,16 @@ static bool sdl3_initialize(uint32_t* display_w, uint32_t* display_h)
 		return false;
 	}
 
-	*display_w = *display_h = 0;
-
 	const SDL_DisplayID* display_ids = SDL_GetDisplays(nullptr);
 	for (int i = 0; display_ids[i]; i++)
 	{
 		SDL_Rect rect;
-		SDL_GetDisplayBounds(display_ids[i], &rect);
-		*display_w = BAN::Math::max<uint32_t>(*display_w, rect.x + rect.w);
-		*display_h = BAN::Math::max<uint32_t>(*display_h, rect.y + rect.h);
+		if (!SDL_GetDisplayBounds(display_ids[i], &rect))
+		{
+			dwarnln("Could not display {} bounds: {}", SDL_GetError());
+			continue;
+		}
+		register_display(rect.x, rect.y, rect.w, rect.h);
 	}
 
 	sdl3_initialize_keymap();

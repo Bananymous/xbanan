@@ -19,6 +19,8 @@
 #include <netinet/in.h>
 #endif
 
+CARD32 g_next_global_id { 1 };
+
 const xPixmapFormat g_formats[6] {
 	{
 		.depth = 1,
@@ -58,7 +60,7 @@ const xDepth g_depth {
 };
 
 const xVisualType g_visual {
-	.visualID = 1,
+	.visualID = g_next_global_id++,
 	.c_class = TrueColor,
 	.bitsPerRGB = 8,
 	.colormapEntries = 256,
@@ -68,23 +70,25 @@ const xVisualType g_visual {
 };
 
 xWindowRoot g_root {
-	.windowId = 2,
+	.windowId = g_next_global_id++,
 	.defaultColormap = 0,
 	.whitePixel = 0xFFFFFF,
 	.blackPixel = 0x000000,
 	.currentInputMask = 0,
 	.pixWidth = 0,
 	.pixHeight = 0,
-	.mmWidth  = 0,
+	.mmWidth = 0,
 	.mmHeight = 0,
 	.minInstalledMaps = 1,
 	.maxInstalledMaps = 1,
 	.rootVisualID = g_visual.visualID,
 	.backingStore = 0,
 	.saveUnders = 0,
-	.rootDepth = 24,
+	.rootDepth = g_depth.depth,
 	.nDepths = 1,
 };
+
+BAN::Vector<DisplayInfo> g_displays;
 
 BAN::HashMap<CARD32, BAN::UniqPtr<Object>> g_objects;
 
@@ -261,13 +265,53 @@ int main()
 	APPEND_ATOM_CUSTOM(_NET_WM_WINDOW_TYPE_UTILITY);
 #undef APPEND_ATOM_CUSTOM
 
-	uint32_t display_w, display_h;
-	if (!g_platform_ops.initialize(&display_w, &display_h))
+	if (!g_platform_ops.initialize())
 		return 1;
-	g_root.pixWidth  = display_w;
-	g_root.pixHeight = display_h;
-	g_root.mmWidth   = static_cast<CARD16>(display_w * 254 / 960); // 96 DPI
-	g_root.mmHeight  = static_cast<CARD16>(display_h * 254 / 960); // 96 DPI
+
+	if (g_displays.empty())
+	{
+		dwarnln("No displays windows initilized");
+		return 1;
+	}
+
+	int32_t display_min_x { INT32_MAX }, display_min_y { INT32_MAX };
+	int32_t display_max_x { INT32_MIN }, display_max_y { INT32_MIN };
+	for (const auto& display : g_displays)
+	{
+		display_min_x = BAN::Math::min<int32_t>(display_min_x, display.x);
+		display_min_y = BAN::Math::min<int32_t>(display_min_y, display.y);
+		display_max_x = BAN::Math::max<int32_t>(display_max_x, display.x + display.w);
+		display_max_y = BAN::Math::max<int32_t>(display_max_y, display.y + display.h);
+	}
+
+	g_root.pixWidth  = display_max_x - display_min_x;
+	g_root.pixHeight = display_max_y - display_min_y;
+
+	g_root.mmWidth  = g_root.pixWidth  * 254 / 960; // 96 DPI
+	g_root.mmHeight = g_root.pixHeight * 254 / 960; // 96 DPI
+
+	Client dummy_owner;
+	MUST(g_objects.insert(g_root.windowId, MUST(BAN::UniqPtr<Object>::create(Object {
+		.type = Object::Type::Window,
+		.object = Object::Window {
+			.owner = dummy_owner,
+			.depth = g_root.rootDepth,
+			.x = display_min_x,
+			.y = display_min_y,
+			.parent = None,
+			.cursor = None,
+			.c_class = InputOutput,
+			.width = g_root.pixWidth,
+			.height = g_root.pixHeight,
+			.background = None,
+		}
+	}))));
+
+	MUST(g_objects.insert(g_visual.visualID,
+		MUST(BAN::UniqPtr<Object>::create(Object {
+			.type = Object::Type::Visual,
+		}))
+	));
 
 	printf("xbanan started\n");
 
@@ -352,28 +396,6 @@ int main()
 				}
 			}
 		};
-
-	Client dummy_client {};
-	MUST(g_objects.insert(g_root.windowId,
-		MUST(BAN::UniqPtr<Object>::create(Object {
-			.type = Object::Type::Window,
-			.object = Object::Window {
-				.owner = dummy_client,
-				.mapped = true,
-				.depth = g_root.rootDepth,
-				.parent = None,
-				.c_class = InputOutput,
-				.width = g_root.pixWidth,
-				.height = g_root.pixHeight,
-			}
-		}))
-	));
-
-	MUST(g_objects.insert(g_visual.visualID,
-		MUST(BAN::UniqPtr<Object>::create(Object {
-			.type = Object::Type::Visual,
-		}))
-	));
 
 	for (;;)
 	{

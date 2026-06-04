@@ -6,12 +6,64 @@
 
 #include <time.h>
 
+struct RANDRDisplay
+{
+	CARD32 crtc_id;
+	CARD32 output_id;
+	CARD32 mode_id;
+	ATOM name_atom;
+	BAN::String output_str;
+	BAN::String mode_str;
+	const DisplayInfo& info;
+};
+
+static BAN::Vector<RANDRDisplay> s_randr_displays;
+static CARD32 s_timestamp { 0 };
+
+static void initialize_displays()
+{
+	for (size_t i = 0; i < g_displays.size(); i++)
+	{
+		auto name = MUST(BAN::String::formatted("B-OUT-{}", i));
+
+		const auto name_atom = g_atom_value++;
+		MUST(g_atoms_name_to_id.insert(name, name_atom));
+		MUST(g_atoms_id_to_name.insert(name_atom, name));
+
+		MUST(s_randr_displays.push_back({
+			.crtc_id    = g_next_global_id++,
+			.output_id  = g_next_global_id++,
+			.mode_id    = g_next_global_id++,
+			.name_atom  = name_atom,
+			.output_str = BAN::move(name),
+			.mode_str   = MUST(BAN::String::formatted("{}x{}", g_displays[i].w, g_displays[i].h)),
+			.info       = g_displays[i],
+		}));
+	}
+
+	s_timestamp = time(nullptr);
+}
+
+static const RANDRDisplay& find_display_by_output(CARD32 output)
+{
+	for (const auto& display : s_randr_displays)
+		if (display.output_id == output)
+			return display;
+	ASSERT_NOT_REACHED();
+}
+
+static const RANDRDisplay& find_display_by_crtc(CARD32 crtc)
+{
+	for (const auto& display : s_randr_displays)
+		if (display.crtc_id == crtc)
+			return display;
+	ASSERT_NOT_REACHED();
+}
+
 static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpan packet)
 {
-	static CARD32 crtc_id   = 5;
-	static CARD32 output_id = 6;
-	static CARD32 mode_id   = 7;
-	static CARD32 timestamp = time(nullptr);
+	if (s_randr_displays.empty())
+		initialize_displays();
 
 	static xRenderTransform transform {
 		1 << 16, 0,       0,
@@ -61,14 +113,14 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.setOfRotations = RR_Rotate_0,
 				.sequenceNumber = client_info.sequence,
 				.length = 3,
-    			.root = g_root.windowId,
-    			.timestamp = timestamp,
-    			.configTimestamp = timestamp,
-    			.nSizes = 1,
-    			.sizeID = 0,
-    			.rotation = RR_Rotate_0,
-    			.rate = 60,
-    			.nrateEnts = 1,
+				.root = g_root.windowId,
+				.timestamp = s_timestamp,
+				.configTimestamp = s_timestamp,
+				.nSizes = 1,
+				.sizeID = 0,
+				.rotation = RR_Rotate_0,
+				.rate = 60,
+				.nrateEnts = 1,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -115,55 +167,63 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("RRGetScreenResources{}", current ? "Current" : "");
 			dprintln("  window: {}", request.window);
 
-			const auto mode_name = TRY(BAN::String::formatted("{}x{}", g_root.pixWidth, g_root.pixHeight));
+			size_t mode_name_bytes = 0;
+			for (const auto& display : s_randr_displays)
+				mode_name_bytes += display.mode_str.size();
 
 			xRRGetScreenResourcesReply reply {
 				.type = X_Reply,
 				.sequenceNumber = client_info.sequence,
-				.length = static_cast<CARD32>(1 + 1 + 8 + (mode_name.size() + 3) / 4),
-				.timestamp = timestamp,
-				.configTimestamp = timestamp,
-				.nCrtcs = 1,
-				.nOutputs = 1,
-				.nModes = 1,
-				.nbytesNames = static_cast<CARD16>(mode_name.size()),
+				.length = static_cast<CARD32>(s_randr_displays.size() * (1 + 1 + 8) + (mode_name_bytes + 3) / 4),
+				.timestamp = s_timestamp,
+				.configTimestamp = s_timestamp,
+				.nCrtcs = static_cast<CARD16>(s_randr_displays.size()),
+				.nOutputs = static_cast<CARD16>(s_randr_displays.size()),
+				.nModes = static_cast<CARD16>(s_randr_displays.size()),
+				.nbytesNames = static_cast<CARD16>(mode_name_bytes),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
-			TRY(encode(client_info.output_buffer, crtc_id));
+			for (const auto& display : s_randr_displays)
+				TRY(encode(client_info.output_buffer, display.crtc_id));
 
-			TRY(encode(client_info.output_buffer, output_id));
+			for (const auto& display : s_randr_displays)
+				TRY(encode(client_info.output_buffer, display.output_id));
 
-			const CARD16 hsync_start = g_root.pixWidth;
-			const CARD16 hsync_end   = g_root.pixWidth + 1;
-			const CARD16 htotal = g_root.pixWidth + 1;
+			for (const auto& display : s_randr_displays)
+			{
+				const CARD16 hsync_start = display.info.w;
+				const CARD16 hsync_end   = display.info.w + 1;
+				const CARD16 htotal = display.info.w + 1;
 
-			const CARD16 vsync_start = g_root.pixHeight;
-			const CARD16 vsync_end   = g_root.pixHeight + 1;
-			const CARD16 vtotal = g_root.pixHeight + 1;
+				const CARD16 vsync_start = display.info.h;
+				const CARD16 vsync_end   = display.info.h + 1;
+				const CARD16 vtotal = display.info.h + 1;
 
-			const CARD32 clock = htotal * vtotal * 60;
+				const CARD32 clock = htotal * vtotal * 60;
 
-			xRRModeInfo mode_info {
-    			.id = mode_id,
-    			.width = g_root.pixWidth,
-    			.height = g_root.pixHeight,
-    			.dotClock = clock,
-    			.hSyncStart = hsync_start,
-    			.hSyncEnd = hsync_end,
-    			.hTotal = htotal,
-    			.hSkew = 0,
-    			.vSyncStart = vsync_start,
-    			.vSyncEnd = vsync_end,
-    			.vTotal = vtotal,
-    			.nameLength = static_cast<CARD16>(mode_name.size()),
-    			.modeFlags = RR_HSyncPositive | RR_VSyncPositive,
-			};
-			TRY(encode(client_info.output_buffer, mode_info));
+				xRRModeInfo mode_info {
+					.id = display.mode_id,
+					.width = static_cast<CARD16>(display.info.w),
+					.height = static_cast<CARD16>(display.info.h),
+					.dotClock = clock,
+					.hSyncStart = hsync_start,
+					.hSyncEnd = hsync_end,
+					.hTotal = htotal,
+					.hSkew = 0,
+					.vSyncStart = vsync_start,
+					.vSyncEnd = vsync_end,
+					.vTotal = vtotal,
+					.nameLength = static_cast<CARD16>(display.mode_str.size()),
+					.modeFlags = RR_HSyncPositive | RR_VSyncPositive,
+				};
+				TRY(encode(client_info.output_buffer, mode_info));
+			}
 
-			TRY(encode(client_info.output_buffer, mode_name));
-			for (size_t i = 0; (mode_name.size() + i) % 4; i++)
-				TRY(encode(client_info.output_buffer, '\0'));
+			for (const auto& display : s_randr_displays)
+				TRY(encode(client_info.output_buffer, display.mode_str));
+			while (client_info.output_buffer.size() % 4)
+				TRY(encode<BYTE>(client_info.output_buffer, 0));
 
 			break;
 		}
@@ -175,27 +235,31 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  output:          {}", request.output);
 			dprintln("  configTimestamp: {}", request.configTimestamp);
 
+			const auto& display = find_display_by_output(request.output);
+
 			xRRGetOutputInfoReply reply {
-    			.type = X_Reply,
-    			.status = Success,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 1 + 1 + 1 + 2,
-    			.timestamp = timestamp,
-    			.crtc = crtc_id,
-    			.mmWidth = g_root.mmWidth,
-    			.mmHeight = g_root.mmHeight,
-    			.connection = RR_Connected,
-    			.subpixelOrder = SubPixelUnknown,
-    			.nCrtcs = 1,
-    			.nModes = 1,
-    			.nPreferred = 1,
-    			.nClones = 0,
-    			.nameLength = 5,
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = static_cast<CARD32>(1 + 1 + 1 + (display.output_str.size() + 3) / 4),
+				.timestamp = s_timestamp,
+				.crtc = display.crtc_id,
+				.mmWidth  = display.info.w * 254 / 960, // 96 DPI
+				.mmHeight = display.info.h * 254 / 960, // 96 DPI
+				.connection = RR_Connected,
+				.subpixelOrder = SubPixelUnknown,
+				.nCrtcs = 1,
+				.nModes = 1,
+				.nPreferred = 1,
+				.nClones = 0,
+				.nameLength = static_cast<CARD16>(display.output_str.size()),
 			};
 			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, crtc_id));
-			TRY(encode(client_info.output_buffer, mode_id));
-			TRY(encode(client_info.output_buffer, "B-OUT\0\0\0"_sv));
+			TRY(encode(client_info.output_buffer, display.crtc_id));
+			TRY(encode(client_info.output_buffer, display.mode_id));
+			TRY(encode(client_info.output_buffer, display.output_str));
+			while (client_info.output_buffer.size() % 4)
+				TRY(encode<BYTE>(client_info.output_buffer, 0));
 
 			break;
 		}
@@ -250,25 +314,27 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  crtc:            {}", request.crtc);
 			dprintln("  configTimestamp: {}", request.configTimestamp);
 
+			const auto& display = find_display_by_crtc(request.crtc);
+
 			xRRGetCrtcInfoReply reply {
 				.type = X_Reply,
 				.status = Success,
 				.sequenceNumber = client_info.sequence,
 				.length = 2,
-				.timestamp = timestamp,
-				.x = 0,
-				.y = 0,
-				.width = g_root.pixWidth,
-				.height = g_root.pixHeight,
-				.mode = mode_id,
+				.timestamp = s_timestamp,
+				.x = static_cast<INT16>(display.info.x),
+				.y = static_cast<INT16>(display.info.y),
+				.width  = static_cast<CARD16>(display.info.w),
+				.height = static_cast<CARD16>(display.info.h),
+				.mode = display.mode_id,
 				.rotation = RR_Rotate_0,
 				.rotations = RR_Rotate_0,
 				.nOutput = 1,
 				.nPossibleOutput = 1,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, output_id));
-			TRY(encode(client_info.output_buffer, output_id));
+			TRY(encode(client_info.output_buffer, display.output_id));
+			TRY(encode(client_info.output_buffer, display.output_id));
 
 			break;
 		}
@@ -285,13 +351,13 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  mode:            {}", request.mode);
 			dprintln("  rotation:        {}", request.rotation);
 
-			timestamp = time(nullptr);
+			s_timestamp = time(nullptr);
 			xRRSetCrtcConfigReply reply {
 				.type = X_Reply,
 				.status = Success,
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
-				.newTimestamp = timestamp,
+				.newTimestamp = s_timestamp,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -301,15 +367,15 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 		{
 			auto request = decode<xRRGetCrtcGammaSizeReq>(packet).value();
 
-			dprintln("RRGetCrtcGammaSize");
-			dprintln("  crtc:            {}", request.crtc);
+			dwarnln("RRGetCrtcGammaSize");
+			dwarnln("  crtc:            {}", request.crtc);
 
 			xRRGetCrtcGammaSizeReply reply {
-    			.type = X_Reply,
-    			.status = Success,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 0,
-				.size = 1,
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.size = 256,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -323,17 +389,16 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  crtc:            {}", request.crtc);
 
 			xRRGetCrtcGammaReply reply {
-    			.type = X_Reply,
-    			.status = Success,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 2,
-				.size = 1,
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = (6 * 256) / 4,
+				.size = 256,
 			};
 			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode<CARD16>(client_info.output_buffer, 1));
-			TRY(encode<CARD16>(client_info.output_buffer, 1));
-			TRY(encode<CARD16>(client_info.output_buffer, 1));
-			TRY(encode<CARD16>(client_info.output_buffer, 0));
+			for (size_t i = 0; i < 3; i++)
+				for (size_t j = 0; j < 256; j++)
+					TRY(encode<CARD16>(client_info.output_buffer, j * 65535 / 255));
 
 			break;
 		}
@@ -345,17 +410,17 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  crtc:            {}", request.crtc);
 
 			xRRGetCrtcTransformReply reply {
-    			.type = X_Reply,
-    			.status = Success,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 16,
-    			.pendingTransform = transform,
-    			.hasTransforms = xFalse,
-    			.currentTransform = transform,
-    			.pendingNbytesFilter = 0,
-    			.pendingNparamsFilter = 0,
-    			.currentNbytesFilter = 0,
-    			.currentNparamsFilter = 0,
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = 16,
+				.pendingTransform = transform,
+				.hasTransforms = xFalse,
+				.currentTransform = transform,
+				.pendingNbytesFilter = 0,
+				.pendingNparamsFilter = 0,
+				.currentNbytesFilter = 0,
+				.currentNparamsFilter = 0,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -369,23 +434,23 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  crtc: {}", request.crtc);
 
 			xRRGetPanningReply reply {
-    			.type = X_Reply,
-    			.status = Success,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 1,
-    			.timestamp = timestamp,
-    			.left = 0,
-    			.top = 0,
-    			.width = 0,
-    			.height = 0,
-    			.track_left = 0,
-    			.track_top = 0,
-    			.track_width = 0,
-    			.track_height = 0,
-    			.border_left = 0,
-    			.border_top = 0,
-    			.border_right = 0,
-    			.border_bottom = 0,
+				.type = X_Reply,
+				.status = Success,
+				.sequenceNumber = client_info.sequence,
+				.length = 1,
+				.timestamp = s_timestamp,
+				.left = 0,
+				.top = 0,
+				.width = 0,
+				.height = 0,
+				.track_left = 0,
+				.track_top = 0,
+				.track_width = 0,
+				.track_height = 0,
+				.border_left = 0,
+				.border_top = 0,
+				.border_right = 0,
+				.border_bottom = 0,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -399,10 +464,10 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  window: {}", request.window);
 
 			xRRGetOutputPrimaryReply reply {
-    			.type = X_Reply,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 0,
-				.output = output_id,
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.output = s_randr_displays.front().output_id,
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
@@ -416,10 +481,10 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  window: {}", request.window);
 
 			xRRGetProvidersReply reply {
-    			.type = X_Reply,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 0,
-				.timestamp = timestamp,
+				.type = X_Reply,
+				.sequenceNumber = client_info.sequence,
+				.length = 0,
+				.timestamp = s_timestamp,
 				.nProviders = 0,
 			};
 			TRY(encode(client_info.output_buffer, reply));
@@ -435,31 +500,33 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 			dprintln("  get_active: {}", request.get_active);
 
 			xRRGetMonitorsReply reply {
-    			.type = X_Reply,
+				.type = X_Reply,
 				.status = Success,
-    			.sequenceNumber = client_info.sequence,
-    			.length = 6 + 1,
-				.timestamp = timestamp,
-				.nmonitors = 1,
-				.noutputs = 1,
+				.sequenceNumber = client_info.sequence,
+				.length = static_cast<CARD32>(6 * s_randr_displays.size() + s_randr_displays.size()),
+				.timestamp = s_timestamp,
+				.nmonitors = static_cast<CARD32>(s_randr_displays.size()),
+				.noutputs = static_cast<CARD32>(s_randr_displays.size()),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
-			xRRMonitorInfo monitor {
-				.name = None,
-				.primary = xTrue,
-				.automatic = xTrue,
-				.noutput = 1,
-				.x = 0,
-				.y = 0,
-				.width = g_root.pixWidth,
-				.height = g_root.pixHeight,
-				.widthInMillimeters = g_root.mmWidth,
-				.heightInMillimeters = g_root.mmHeight,
-			};
-			TRY(encode(client_info.output_buffer, monitor));
-
-			TRY(encode(client_info.output_buffer, output_id));
+			for (const auto& display : s_randr_displays)
+			{
+				xRRMonitorInfo monitor {
+					.name = display.name_atom,
+					.primary = (&display == &s_randr_displays.front()),
+					.automatic = xTrue,
+					.noutput = 1,
+					.x = static_cast<INT16>(display.info.x),
+					.y = static_cast<INT16>(display.info.y),
+					.width  = static_cast<CARD16>(display.info.w),
+					.height = static_cast<CARD16>(display.info.h),
+					.widthInMillimeters  = display.info.w * 254 / 96, // 96 DPI
+					.heightInMillimeters = display.info.h * 254 / 96, // 96 DPI
+				};
+				TRY(encode(client_info.output_buffer, monitor));
+				TRY(encode(client_info.output_buffer, display.output_id));
+			}
 
 			break;
 		}

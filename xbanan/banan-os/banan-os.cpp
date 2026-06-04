@@ -28,7 +28,7 @@ struct BananCursor final : public PlatformCursor
 
 static BAN::ErrorOr<void> bananos_initialize_keymap();
 
-static bool bananos_initialize(uint32_t* display_w, uint32_t* display_h)
+static bool bananos_initialize()
 {
 	auto attributes = LibGUI::Window::default_attributes;
 	attributes.shown = false;
@@ -40,8 +40,7 @@ static bool bananos_initialize(uint32_t* display_w, uint32_t* display_h)
 		return false;
 	}
 
-	*display_w = dummy_or_error.value()->width();
-	*display_h = dummy_or_error.value()->height();
+	register_display(0, 0, dummy_or_error.value()->width(), dummy_or_error.value()->height());
 
 	if (auto ret = bananos_initialize_keymap(); ret.is_error())
 	{

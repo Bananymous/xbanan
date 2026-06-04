@@ -161,6 +161,12 @@ struct EpollThingy
 	BAN::Variant<Client, void*> value;
 };
 
+struct DisplayInfo
+{
+	int32_t x, y;
+	uint32_t w, h;
+};
+
 extern const xPixmapFormat g_formats[6];
 extern const xDepth g_depth;
 extern const xVisualType g_visual;
@@ -176,3 +182,7 @@ extern int g_epoll_fd;
 extern BAN::HashMap<int, EpollThingy> g_epoll_thingies;
 
 extern int g_server_grabber_fd;
+
+extern BAN::Vector<DisplayInfo> g_displays;
+
+extern CARD32 g_next_global_id;

@@ -47,7 +47,7 @@ enum class SystemCursorType
 struct PlatformOps
 {
 	/* Do platform initialization */
-	bool (*initialize)(uint32_t* width, uint32_t* height);
+	bool (*initialize)();
 	/* Handle pending events */
 	void (*poll_events)(void*);
 	/* Create a window with given size */
@@ -74,3 +74,5 @@ struct PlatformOps
 	void (*set_cursor)(PlatformWindow*, PlatformCursor*);
 };
 extern PlatformOps g_platform_ops;
+
+void register_display(int32_t x, int32_t y, uint32_t width, uint32_t height);

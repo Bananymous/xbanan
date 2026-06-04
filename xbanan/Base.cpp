@@ -159,6 +159,16 @@ static const char* s_opcode_to_name[] {
 	[X_NoOperation] = "X_NoOperation",
 };
 
+void register_display(int32_t x, int32_t y, uint32_t width, uint32_t height)
+{
+	MUST(g_displays.push_back({
+		.x = x,
+		.y = y,
+		.w = width,
+		.h = height,
+	}));
+}
+
 uint32_t Object::Window::full_event_mask() const
 {
 	uint32_t full_event_mask = 0;
@@ -200,9 +210,9 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 	xConnSetupPrefix setup_prefix {
 		.success = 1,
 		.lengthReason = 0, // wtf is this
-		.majorVersion = client_prefix.majorVersion,
-		.minorVersion = client_prefix.minorVersion,
-		.length = 8 + 2*format_count + (8 + 0 + sz_xWindowRoot + sz_xDepth + sz_xVisualType) / 4,
+		.majorVersion = 11,
+		.minorVersion = 0,
+		.length = 8 + 2 * format_count + (8 + 0 + sz_xWindowRoot + sz_xDepth + sz_xVisualType) / 4,
 	};
 	TRY(encode(client_info.output_buffer, setup_prefix));
 
@@ -1363,15 +1373,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			CARD16 width, height;
 			CARD8 depth;
 
-			if (drawable_id == g_root.windowId)
-			{
-				width = g_root.pixWidth;
-				height = g_root.pixHeight;
-				depth = g_root.rootDepth;
-				x = 0;
-				y = 0;
-			}
-			else if (drawable.type == Object::Type::Window)
+			if (drawable.type == Object::Type::Window)
 			{
 				const auto& window = drawable.object.get<Object::Window>();
 				width = window.width;

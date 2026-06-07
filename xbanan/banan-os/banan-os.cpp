@@ -200,29 +200,27 @@ PlatformOps g_platform_ops = {
 #include <LibInput/KeyboardLayout.h>
 #include <LibInput/KeyEvent.h>
 
-static uint32_t bananos_key_to_x_keysym(LibInput::Key, bool upper);
+static uint32_t bananos_keyevent_to_x_keysym(LibInput::KeyEvent event);
 
 static BAN::ErrorOr<void> bananos_initialize_keymap()
 {
+	static constexpr uint16_t modifier_map[] {
+		0,
+		LibInput::KeyEvent::LShift,
+		LibInput::KeyEvent::RAlt,
+		LibInput::KeyEvent::RAlt | LibInput::KeyEvent::LShift,
+	};
+
 	// FIXME: get this from somewhere (gui command? enviroment? tmp file?)
 	const auto keymap_path = "./us.keymap"_sv;
-
 	TRY(LibInput::KeyboardLayout::initialize());
-
 	auto& keyboard_layout = LibInput::KeyboardLayout::get();
 	TRY(keyboard_layout.load_from_file(keymap_path));
 
-	const BAN::Span<const LibInput::Key> banan_keymaps[] {
-		keyboard_layout.keymap_normal(),
-		keyboard_layout.keymap_shift(),
-		keyboard_layout.keymap_altgr(),
-		keyboard_layout.keymap_altgr(), // add shift+altgr map?
-	};
-
-	for (size_t scancode = 0; scancode < g_keymap_size; scancode++)
+	for (uint8_t scancode = 0; scancode < g_keymap_size; scancode++)
 		for (size_t layer = 0; layer < g_keymap_layers; layer++)
-			if (const auto banan_key = banan_keymaps[layer][scancode]; banan_key != LibInput::Key::None)
-				g_keymap[scancode][layer] = bananos_key_to_x_keysym(banan_key, layer % 2);
+			if (const auto event = keyboard_layout.key_event_from_raw({ .modifier = modifier_map[layer], .keycode = scancode }); event.key != LibInput::Key::None)
+				g_keymap[scancode][layer] = bananos_keyevent_to_x_keysym(event);
 
 	using LibInput::keycode_normal;
 	using LibInput::keycode_numpad;
@@ -257,22 +255,22 @@ static BAN::ErrorOr<void> bananos_initialize_keymap()
 
 #include <wctype.h>
 
-static uint32_t bananos_key_to_x_keysym(LibInput::Key key, bool upper)
+static uint32_t bananos_keyevent_to_x_keysym(LibInput::KeyEvent event)
 {
 	using namespace LibInput;
 
-	if (const char* utf8 = key_to_utf8(key, upper ? KeyEvent::LShift : 0))
+	if (const char* utf8 = key_to_utf8(event.key, event.modifier))
 	{
-		const uint32_t codepoint = BAN::UTF8::to_codepoint(utf8);
+		uint32_t codepoint = BAN::UTF8::to_codepoint(utf8);
 		if (codepoint != BAN::UTF8::invalid && iswprint(codepoint))
 		{
-			if ((codepoint >= 0x20 && codepoint <= 0x7E) || (codepoint >= 0xA0 && codepoint <= 0xFF))
-				return codepoint;
-			return 0x01000000 | codepoint;
+			if (codepoint >= 0x100)
+				codepoint |= 0x01000000;
+			return codepoint;
 		}
 	}
 
-	switch (key)
+	switch (event.key)
 	{
 		case Key::F1:             return XK_F1;
 		case Key::F2:             return XK_F2;

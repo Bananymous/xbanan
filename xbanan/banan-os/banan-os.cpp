@@ -57,12 +57,9 @@ static void bananos_poll_events(void* window)
 	banan_window.window->poll_events();
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(PlatformWindow* parent, WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
 {
-	(void)parent;
 	(void)type;
-	(void)x;
-	(void)y;
 
 	auto window = TRY(BAN::UniqPtr<BananWindow>::create());
 
@@ -70,6 +67,7 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(Platform
 	attributes.shown = true;
 	attributes.title_bar = false;
 	attributes.resizable = true;
+	attributes.alpha_channel = true;
 
 	auto gui_window = TRY(LibGUI::Window::create(width, height, ""_sv, attributes));
 	auto* winp = gui_window.ptr();
@@ -132,18 +130,28 @@ static void bananos_request_resize(PlatformWindow* window, uint32_t width, uint3
 	banan_window.window->request_resize(width, height);
 }
 
-static void bananos_invalidate(PlatformWindow* window, const uint32_t* pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+static void bananos_invalidate(PlatformWindow* window, const void* src_pixels, uint32_t src_pitch, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
 
-	const uint32_t win_width = banan_window.window->width();
+	auto& texture = banan_window.window->texture();
+	void* dst_pixels = &texture.pixels()[y * texture.width() + x];
+	const uint32_t dst_pitch = texture.width() * sizeof(uint32_t);
 
-	auto* out_pixels = banan_window.window->texture().pixels().data();
 	for (uint32_t y_off = 0; y_off < height; y_off++)
-		for (uint32_t x_off = 0; x_off < width; x_off++)
-			out_pixels[(y + y_off) * win_width + (x + x_off)] = pixels[(y + y_off) * win_width + (x + x_off)];
+	{
+		memcpy(
+			static_cast<      uint8_t*>(dst_pixels) + y_off * dst_pitch,
+			static_cast<const uint8_t*>(src_pixels) + y_off * src_pitch,
+			width * sizeof(uint32_t)
+		);
+	}
+}
 
-	banan_window.window->invalidate(x, y, width, height);
+static void bananos_end_frame(PlatformWindow* window)
+{
+	auto& banan_window = *static_cast<BananWindow*>(window);
+	banan_window.window->invalidate();
 }
 
 static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
@@ -186,6 +194,8 @@ PlatformOps g_platform_ops = {
 	.poll_events          = bananos_poll_events,
 	.create_window        = bananos_create_window,
 	.invalidate           = bananos_invalidate,
+	.begin_frame          = nullptr,
+	.end_frame            = bananos_end_frame,
 	.request_resize       = bananos_request_resize,
 	.request_reposition   = nullptr,
 	.request_fullscreen   = bananos_request_fullscreen,

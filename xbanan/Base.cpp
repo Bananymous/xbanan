@@ -296,85 +296,61 @@ static BAN::ErrorOr<void> send_visibility_events_recursively(Client& client_info
 	return {};
 }
 
-static void invalidate_window_recursive(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
+static void invalidate_window_recursive(Object::Window& dst_window, int32_t dst_x, int32_t dst_y, const Object::Window& src_window, int32_t src_x, int32_t src_y, int32_t w, int32_t h)
 {
-	ASSERT(wid != g_root.windowId);
+	ASSERT(src_window.mapped);
 
-	if (x + w <= 0 || y + h <= 0)
-		return;
-	if (w <= 0 || h <= 0)
-		return;
-
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
-
-	auto& window = object.object.get<Object::Window>();
-	if (!window.mapped)
-		return;
-
-	for (auto child_wid : window.children)
+	if (src_window.c_class == InputOutput)
 	{
-		const auto& child_object = *g_objects[child_wid];
-		ASSERT(child_object.type == Object::Type::Window);
+		ASSERT(src_x >= 0);
+		ASSERT(src_y >= 0);
+		ASSERT(src_x + w <= src_window.width);
+		ASSERT(src_y + h <= src_window.height);
+		ASSERT(dst_x + w <= dst_window.width);
+		ASSERT(dst_y + h <= dst_window.height);
 
-		const auto& child_window = child_object.object.get<Object::Window>();
-		if (!child_window.mapped)
-			continue;
-
-		const auto child_x = x - child_window.x;
-		const auto child_y = y - child_window.y;
-
-		const auto child_w = BAN::Math::min<int32_t>(w - child_window.x, child_window.width  - child_x);
-		const auto child_h = BAN::Math::min<int32_t>(h - child_window.y, child_window.height - child_y);
-
-		invalidate_window_recursive(
-			child_wid,
-			child_x, child_y,
-			child_w, child_h
-		);
+		for (int32_t y = 0; y < h; y++)
+		{
+			      uint32_t* dst_u32 = &dst_window.double_buffer[(dst_y + y) * dst_window.width + dst_x];
+			const uint32_t* src_u32 = &src_window.       pixels[(src_y + y) * src_window.width + src_x];
+			for (int32_t x = 0; x < w; x++)
+			{
+				if (src_u32[x] != COLOR_INVISIBLE)
+					dst_u32[x] = 0xFF000000 | src_u32[x];
+				else if (&dst_window == &src_window)
+					dst_u32[x] = 0x00000000;
+			}
+		}
 	}
 
-	if (window.platform_window || window.c_class == InputOnly)
-		return;
-
-	auto& parent_object = *g_objects[window.parent];
-	ASSERT(parent_object.type == Object::Type::Window);
-
-	auto& parent_window = parent_object.object.get<Object::Window>();
-
-	const uint32_t* child_pix = window.pixels.data();
-	const int32_t child_w = window.width;
-	const int32_t child_h = window.height;
-
-	uint32_t* parent_pix = parent_window.pixels.data();
-	const int32_t parent_w = parent_window.width;
-	const int32_t parent_h = parent_window.height;
-
-	// FIXME: optimize this
-	for (int32_t y_off = 0; y_off < h; y_off++)
+	for (auto child_wid : src_window.children)
 	{
-		const int32_t child_y = y + y_off;
-		if (child_y < 0 || child_y >= child_h)
+		const auto& child = g_objects[child_wid]->object.get<Object::Window>();
+		if (!child.mapped)
 			continue;
 
-		const int32_t parent_y = window.y + y + y_off;
-		if (parent_y < 0 || parent_y >= parent_h)
+		const auto diff_x = src_x - child.x;
+		const auto diff_y = src_y - child.y;
+
+		const auto min_x = BAN::Math::max<int32_t>(diff_x, 0);
+		const auto min_y = BAN::Math::max<int32_t>(diff_y, 0);
+
+		const auto max_x = BAN::Math::min<int32_t>(diff_x + w, child.width);
+		const auto max_y = BAN::Math::min<int32_t>(diff_y + h, child.height);
+
+		if (max_x <= min_x || max_y <= min_y)
 			continue;
 
-		for (int32_t x_off = 0; x_off < w; x_off++)
-		{
-			const int32_t child_x = x + x_off;
-			if (child_x < 0 || child_x >= child_w)
-				continue;
-
-			const int32_t parent_x = window.x + x + x_off;
-			if (parent_x < 0 || parent_x >= parent_w)
-				continue;
-
-			const uint32_t color = child_pix[child_y * child_w + child_x];
-			if (color != COLOR_INVISIBLE)
-				parent_pix[parent_y * parent_w + parent_x] = color;
-		}
+		invalidate_window_recursive(
+			dst_window,
+			dst_x - (diff_x - min_x),
+			dst_y - (diff_y - min_y),
+			child,
+			min_x,
+			min_y,
+			max_x - min_x,
+			max_y - min_y
+		);
 	}
 }
 
@@ -382,68 +358,120 @@ void invalidate_window(WINDOW wid, int32_t x, int32_t y, int32_t w, int32_t h)
 {
 	ASSERT(wid != g_root.windowId);
 
+	int32_t min_x { x }, max_x { x + w };
+	int32_t min_y { y }, max_y { y + h };
+
 	for (;;)
 	{
 		if (wid == g_root.windowId)
 			return;
 
-		auto& object = *g_objects[wid];
-		ASSERT(object.type == Object::Type::Window);
-
-		auto& window = object.object.get<Object::Window>();
+		const auto& window = g_objects[wid]->object.get<Object::Window>();
 		if (!window.mapped)
 			return;
+
+		if (min_x < 0)
+			min_x = 0;
+		if (min_y < 0)
+			min_y = 0;
+
+		if (max_x > window.width)
+			max_x = window.width;
+		if (max_y > window.height)
+			max_y = window.height;
+
+		if (max_x <= min_x || max_y <= min_y)
+			return;
+
 		if (window.platform_window)
 			break;
 
-		x += window.x;
-		y += window.y;
+		min_x += window.x;
+		min_y += window.y;
 		wid = window.parent;
 	}
 
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
+	auto& window = g_objects[wid]->object.get<Object::Window>();
 
-	auto& window = object.object.get<Object::Window>();
-	ASSERT(window.platform_window);
+	invalidate_window_recursive(
+		window, min_x, min_y,
+		window, min_x, min_y,
+		max_x - min_x,
+		max_y - min_y
+	);
 
-	invalidate_window_recursive(wid, x, y, w, h);
+	if (!window.platform_window_invalidated && g_platform_ops.begin_frame)
+		g_platform_ops.begin_frame(window.platform_window.ptr());
+	window.platform_window_invalidated = true;
 
-	const auto min_x = BAN::Math::max<int32_t>(x, 0);
-	const auto min_y = BAN::Math::max<int32_t>(y, 0);
-	const auto max_x = BAN::Math::min<int32_t>(x + w, window.width);
-	const auto max_y = BAN::Math::min<int32_t>(y + h, window.height);
-
-	if (min_x >= max_x || min_y >= max_y)
-		return;
-
-	uint32_t* pixels = window.pixels.data();
-	for (auto y = min_y; y < max_y; y++)
-	{
-		for (auto x = min_x; x < max_x; x++)
-		{
-			auto& pixel = pixels[y * window.width + x];
-			if (pixel == COLOR_INVISIBLE)
-				pixel = 0x00000000;
-			else
-				pixel |= 0xFF000000;
-		}
-	}
-
-	g_platform_ops.invalidate(window.platform_window.ptr(), window.pixels.data(), min_x, min_y, max_x - min_x, max_y - min_y);
+	g_platform_ops.invalidate(
+		window.platform_window.ptr(),
+		&window.double_buffer[min_y * window.width + min_x],
+		window.width * sizeof(uint32_t),
+		min_x, min_y,
+		max_x - min_x,
+		max_y - min_y
+	);
 }
 
-void send_exposure_recursive(WINDOW wid)
+BAN::ErrorOr<void> send_configure_notify(WINDOW wid)
 {
-	auto& object = *g_objects[wid];
-	ASSERT(object.type == Object::Type::Window);
+	auto& window = g_objects[wid]->object.get<Object::Window>();
 
-	auto& window = object.object.get<Object::Window>();
+	{
+		xEvent event = { .u = {
+			.configureNotify = {
+				.event = wid,
+				.window = wid,
+				.aboveSibling = xFalse,
+				.x = static_cast<INT16>(window.x),
+				.y = static_cast<INT16>(window.y),
+				.width = static_cast<CARD16>(window.width),
+				.height = static_cast<CARD16>(window.height),
+				.borderWidth = 0,
+				.override = xFalse,
+			}
+		}};
+		event.u.u.type = ConfigureNotify;
+		TRY(window.send_event(event, StructureNotifyMask));
+	}
+
+	auto& parent_object = *g_objects[window.parent];
+	ASSERT(parent_object.type == Object::Type::Window);
+	auto& parent_window = parent_object.object.get<Object::Window>();
+
+	{
+		xEvent event = { .u = {
+			.configureNotify = {
+				.event = window.parent,
+				.window = wid,
+				.aboveSibling = xFalse,
+				.x = static_cast<INT16>(window.x),
+				.y = static_cast<INT16>(window.y),
+				.width = static_cast<CARD16>(window.width),
+				.height = static_cast<CARD16>(window.height),
+				.borderWidth = 0,
+				.override = xFalse,
+			}
+		}};
+		event.u.u.type = ConfigureNotify;
+		TRY(parent_window.send_event(event, SubstructureNotifyMask));
+	}
+
+	return {};
+}
+
+BAN::ErrorOr<void> send_exposure_events_recursive(WINDOW wid)
+{
+	auto& window = g_objects[wid]->object.get<Object::Window>();
 	if (!window.mapped)
-		return;
+		return {};
 
 	for (auto child_wid : window.children)
-		send_exposure_recursive(child_wid);
+		TRY(send_exposure_events_recursive(child_wid));
+
+	if (window.c_class == InputOnly)
+		return {};
 
 	xEvent event = { .u = {
 		.expose = {
@@ -455,66 +483,32 @@ void send_exposure_recursive(WINDOW wid)
 		}
 	}};
 	event.u.u.type = Expose;
-	MUST(window.send_event(event, ExposureMask));
+	TRY(window.send_event(event, ExposureMask));
+
+	return {};
 }
 
-struct PlatformWindowInfo
-{
-	PlatformWindow* parent;
-	WindowType type;
-};
-
-static PlatformWindowInfo get_plaform_window_info(const Object::Window& window)
+static WindowType get_plaform_window_info(const Object::Window& window)
 {
 	static const CARD32 ATOM                              = g_atoms_name_to_id["ATOM"_sv];
-	static const CARD32 WINDOW                            = g_atoms_name_to_id["WINDOW"_sv];
-	static const CARD32 WM_TRANSIENT_FOR                  = g_atoms_name_to_id["WM_TRANSIENT_FOR"_sv];
 	static const CARD32 _NET_WM_WINDOW_TYPE               = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE"_sv];
 	static const CARD32 _NET_WM_WINDOW_TYPE_DIALOG        = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_DIALOG"_sv];
 	static const CARD32 _NET_WM_WINDOW_TYPE_NORMAL        = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_NORMAL"_sv];
 	static const CARD32 _NET_WM_WINDOW_TYPE_SPLASH        = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_SPLASH"_sv];
-	static const CARD32 _NET_WM_WINDOW_TYPE_UTILITY       = g_atoms_name_to_id["_NET_WM_WINDOW_TYPE_UTILITY"_sv];
 
-	PlatformWindowInfo info {
-		.parent = nullptr,
-		.type = WindowType::Normal,
-	};
+	auto it = window.properties.find(_NET_WM_WINDOW_TYPE);
+	if (it == window.properties.end())
+		return WindowType::Normal;
 
-	if (auto it = window.properties.find(_NET_WM_WINDOW_TYPE); it != window.properties.end())
-	{
-		if (it->value.type != ATOM || it->value.data.size() != sizeof(CARD32))
-			goto wm_window_type_done;
+	if (it->value.type != ATOM || it->value.data.size() != sizeof(CARD32))
+		return WindowType::Normal;
 
-		const CARD32 type = *reinterpret_cast<const CARD32*>(it->value.data.data());
-		if (type == _NET_WM_WINDOW_TYPE_NORMAL)
-			info.type = WindowType::Normal;
-		else if (type == _NET_WM_WINDOW_TYPE_SPLASH || type == _NET_WM_WINDOW_TYPE_DIALOG)
-			info.type = WindowType::Utility;
-		else
-			info.type = WindowType::Popup;
-	}
-wm_window_type_done:
-
-	if (auto it = window.properties.find(WM_TRANSIENT_FOR); it != window.properties.end())
-	{
-		if (it->value.type != WINDOW || it->value.data.size() != sizeof(CARD32))
-			goto transitient_for_done;
-
-		const CARD32 wid = *reinterpret_cast<const CARD32*>(it->value.data.data());
-
-		auto it2 = g_objects.find(wid);
-		if (it2 == g_objects.end())
-			goto transitient_for_done;
-		if (it2->value->type != Object::Type::Window)
-			goto transitient_for_done;
-
-		// FIXME: support child windows
-		auto& window = it2->value->object.get<Object::Window>();
-		info.parent = window.platform_window.ptr();
-	}
-transitient_for_done:
-
-	return info;
+	const CARD32 type = *reinterpret_cast<const CARD32*>(it->value.data.data());
+	if (type == _NET_WM_WINDOW_TYPE_NORMAL)
+		return WindowType::Normal;
+	if (type == _NET_WM_WINDOW_TYPE_SPLASH || type == _NET_WM_WINDOW_TYPE_DIALOG)
+		return WindowType::Utility;
+	return WindowType::Popup;
 }
 
 static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
@@ -537,10 +531,13 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 		if (window.width <= 10 || window.height <= 10)
 			return {};
 
-		auto info = get_plaform_window_info(window);
+		TRY(window.double_buffer.resize(window.width * window.height));
+		for (auto& pixel : window.double_buffer)
+			pixel = window.background;
+
+		const auto type = get_plaform_window_info(window);
 		window.platform_window = TRY(g_platform_ops.create_window(
-			info.parent,
-			info.type,
+			type,
 			wid,
 			window.x,
 			window.y,
@@ -584,19 +581,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 	if (is_visible(window.parent))
 		TRY(send_visibility_events_recursively(client_info, wid, true));
 
-	{
-		xEvent event = { .u = {
-			.expose = {
-				.window = wid,
-				.x = 0,
-				.y = 0,
-				.width = static_cast<CARD16>(window.width),
-				.height = static_cast<CARD16>(window.height),
-			}
-		}};
-		event.u.u.type = Expose;
-		TRY(window.send_event(event, ExposureMask));
-	}
+	TRY(send_exposure_events_recursive(wid));
 
 	return {};
 }
@@ -612,8 +597,8 @@ static BAN::ErrorOr<void> unmap_window(Client& client_info, WINDOW wid)
 
 	window.mapped = false;
 
-	if (window.platform_window)
-		window.platform_window.clear();
+	window.double_buffer.clear();
+	window.platform_window.clear();
 
 	if (is_visible(window.parent))
 		TRY(send_visibility_events_recursively(client_info, wid, false));
@@ -1228,6 +1213,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("ConfigureWindow");
 			dprintln("  window: {}", request.window);
+			dprintln("  mask:   {4h}", request.mask);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
@@ -1236,7 +1222,6 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			uint32_t new_width = window.width;
 			uint32_t new_height = window.height;
 
-			dprintln("  mask:");
 			for (size_t i = 0; i < 7; i++)
 			{
 				if (!(request.mask & (1 << i)))
@@ -1248,15 +1233,19 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				{
 					case 0:
 						new_x = value;
+						dprintln("    x: {}", value);
 						break;
 					case 1:
 						new_y = value;
+						dprintln("    y: {}", value);
 						break;
 					case 2:
 						new_width = value;
+						dprintln("    w: {}", value);
 						break;
 					case 3:
 						new_height = value;
+						dprintln("    h: {}", value);
 						break;
 					default:
 						dprintln("    {4h}: {4h}", 1 << i, value);
@@ -1264,7 +1253,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}
 			}
 
-			bool send_configure = false;
+			bool should_send_configure_notify = false;
 
 			if (new_x != window.x || new_y != window.y)
 			{
@@ -1277,7 +1266,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				{
 					window.x = new_x;
 					window.y = new_y;
-					send_configure = true;
+					should_send_configure_notify = true;
 				}
 			}
 
@@ -1296,52 +1285,17 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 					window.width  = new_width;
 					window.height = new_height;
-					send_configure = true;
+					should_send_configure_notify = true;
 				}
 			}
 
-			if (!send_configure)
+			if (!should_send_configure_notify)
 				break;
 
-			{
-				xEvent event = { .u = {
-					.configureNotify = {
-						.event = request.window,
-						.window = request.window,
-						.aboveSibling = xFalse,
-						.x = static_cast<INT16>(window.x),
-						.y = static_cast<INT16>(window.y),
-						.width = static_cast<CARD16>(window.width),
-						.height = static_cast<CARD16>(window.height),
-						.borderWidth = 0,
-						.override = xFalse,
-					}
-				}};
-				event.u.u.type = ConfigureNotify;
-				TRY(window.send_event(event, StructureNotifyMask));
-			}
+			TRY(send_configure_notify(request.window));
 
-			auto& parent_object = *g_objects[window.parent];
-			ASSERT(parent_object.type == Object::Type::Window);
-			auto& parent_window = parent_object.object.get<Object::Window>();
-
-			{
-				xEvent event = { .u = {
-					.configureNotify = {
-						.event = window.parent,
-						.window = request.window,
-						.aboveSibling = xFalse,
-						.x = static_cast<INT16>(window.x),
-						.y = static_cast<INT16>(window.y),
-						.width = static_cast<CARD16>(window.width),
-						.height = static_cast<CARD16>(window.height),
-						.borderWidth = 0,
-						.override = xFalse,
-					}
-				}};
-				event.u.u.type = ConfigureNotify;
-				TRY(parent_window.send_event(event, SubstructureNotifyMask));
-			}
+			if (is_visible(request.window))
+				TRY(send_exposure_events_recursive(request.window));
 
 			break;
 		}
@@ -2194,7 +2148,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			// TODO: support invisible background
 
 			uint32_t foreground = 0x000000;
-			uint32_t background = 0x000000;
+			uint32_t background = 0xFFFFFF;
 			uint16_t line_width = 0;
 			uint32_t font = None;
 			bool graphics_exposures = true;

@@ -51,9 +51,14 @@ struct PlatformOps
 	/* Handle pending events */
 	void (*poll_events)(void*);
 	/* Create a window with given size */
-	BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> (*create_window)(PlatformWindow* parent, WindowType, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height);
-	/* Invaldate part of a window */
-	void (*invalidate)(PlatformWindow*, const uint32_t* pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+	BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> (*create_window)(WindowType, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height);
+	/* All invalidate calls during one frame happen between calls to begin_frame and end_frame. pixels is in ARGB8888
+	 *   invalidate    should update the underlying textures
+	 *   begin_frame   should do any necessary preparations to update a frame
+	 *   end_frame     should flush the updated texturee to the window */
+	void (*invalidate)(PlatformWindow*, const void* pixels, uint32_t pitch, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+	void (*begin_frame)(PlatformWindow*);
+	void (*end_frame)(PlatformWindow*);
 	/* Request resize of a window, can be async */
 	void (*request_resize)(PlatformWindow*, uint32_t width, uint32_t height);
 	/* Request window repositioning */

@@ -629,6 +629,18 @@ int main()
 			}
 		}
 
+		for (auto& [_, object] : g_objects)
+		{
+			if (object->type != Object::Type::Window)
+				continue;
+			auto& window = object->object.get<Object::Window>();
+			if (!window.platform_window_invalidated)
+				continue;
+			if (g_platform_ops.end_frame)
+				g_platform_ops.end_frame(window.platform_window.ptr());
+			window.platform_window_invalidated = false;
+		}
+
 	iterator_invalidated:
 		for (auto& [_, thingy] : g_epoll_thingies)
 		{

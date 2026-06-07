@@ -107,7 +107,7 @@ BAN::ErrorOr<void> poly_line(Client& client_info, BAN::ConstByteSpan packet)
 	auto request = decode<xPolyLineReq>(packet).value();
 
 	dprintln("PolyLine");
-	dprintln("  drawable:  {}", request.drawable);
+	dprintln("  drawable:  {h}", request.drawable);
 	dprintln("  gc:        {}", request.gc);
 	dprintln("  coordMode: {}", request.coordMode);
 
@@ -161,7 +161,7 @@ BAN::ErrorOr<void> poly_segment(Client& client_info, BAN::ConstByteSpan packet)
 	auto request = decode<xPolySegmentReq>(packet).value();
 
 	dprintln("PolySegment");
-	dprintln("  drawable: {}", request.drawable);
+	dprintln("  drawable: {h}", request.drawable);
 	dprintln("  gc:       {}", request.gc);
 
 	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolySegment));
@@ -203,7 +203,7 @@ BAN::ErrorOr<void> fill_poly(Client& client_info, BAN::ConstByteSpan packet)
 	auto request = decode<xFillPolyReq>(packet).value();
 
 	dprintln("FillPoly");
-	dprintln("  drawable:  {}", request.drawable);
+	dprintln("  drawable:  {h}", request.drawable);
 	dprintln("  gc:        {}", request.gc);
 	dprintln("  shape:     {}", request.shape);
 	dprintln("  coordMode: {}", request.coordMode);
@@ -278,7 +278,7 @@ BAN::ErrorOr<void> poly_fill_rectangle(Client& client_info, BAN::ConstByteSpan p
 	auto request = decode<xPolyFillRectangleReq>(packet).value();
 
 	dprintln("PolyFillRectangle");
-	dprintln("  drawable: {}", request.drawable);
+	dprintln("  drawable: {h}", request.drawable);
 	dprintln("  gc:       {}", request.gc);
 
 	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyFillRectangle));
@@ -320,7 +320,7 @@ BAN::ErrorOr<void> poly_fill_arc(Client& client_info, BAN::ConstByteSpan packet)
 	auto request = decode<xPolyFillArcReq>(packet).value();
 
 	dprintln("PolyFillArc");
-	dprintln("  drawable: {}", request.drawable);
+	dprintln("  drawable: {h}", request.drawable);
 	dprintln("  gc:       {}", request.gc);
 
 	auto [out_data_32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyFillArc));

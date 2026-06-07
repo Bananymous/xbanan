@@ -66,7 +66,10 @@ struct Object
 
 		uint32_t background { 0 };
 
+		bool platform_window_invalidated { false };
 		BAN::UniqPtr<PlatformWindow> platform_window;
+
+		BAN::Vector<uint32_t> double_buffer;
 
 		BAN::HashMap<Client*, uint32_t> event_masks;
 

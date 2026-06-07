@@ -75,69 +75,26 @@ void on_window_close_event(WINDOW wid)
 	}
 }
 
-static void send_window_configure(WINDOW wid, Object::Window& window)
-{
-	{
-		xEvent event = { .u = {
-			.configureNotify = {
-				.event = wid,
-				.window = wid,
-				.aboveSibling = xFalse,
-				.x = static_cast<INT16>(window.x),
-				.y = static_cast<INT16>(window.y),
-				.width = static_cast<CARD16>(window.width),
-				.height = static_cast<CARD16>(window.height),
-				.borderWidth = 0,
-				.override = xFalse,
-			}
-		}};
-		event.u.u.type = ConfigureNotify;
-		MUST(window.send_event(event, StructureNotifyMask));
-	}
-
-	auto& parent_object = *g_objects[window.parent];
-	ASSERT(parent_object.type == Object::Type::Window);
-	auto& parent_window = parent_object.object.get<Object::Window>();
-
-	{
-		xEvent event = { .u = {
-			.configureNotify = {
-				.event = window.parent,
-				.window = wid,
-				.aboveSibling = xFalse,
-				.x = static_cast<INT16>(window.x),
-				.y = static_cast<INT16>(window.y),
-				.width = static_cast<CARD16>(window.width),
-				.height = static_cast<CARD16>(window.height),
-				.borderWidth = 0,
-				.override = xFalse,
-			}
-		}};
-		event.u.u.type = ConfigureNotify;
-		MUST(parent_window.send_event(event, SubstructureNotifyMask));
-	}
-}
-
 void on_window_resize_event(WINDOW wid, uint32_t new_width, uint32_t new_height)
 {
 	auto& object = *g_objects[wid];
 	ASSERT(object.type == Object::Type::Window);
 	auto& window = object.object.get<Object::Window>();
 
-	{
-		window.width  = new_width;
-		window.height = new_height;
+	window.width  = new_width;
+	window.height = new_height;
 
-		MUST(window.pixels.resize(new_width * new_height));
-		for (auto& pixel : window.pixels)
-			pixel = window.background;
-	}
+	MUST(window.pixels.resize(new_width * new_height));
+	for (auto& pixel : window.pixels)
+		pixel = window.background;
 
-	send_window_configure(wid, window);
+	MUST(window.double_buffer.resize(new_width * new_height));
+	for (auto& pixel : window.double_buffer)
+		pixel = window.background;
 
-	send_exposure_recursive(wid);
+	MUST(send_configure_notify(wid));
 
-	invalidate_window(wid, 0, 0, window.width, window.height);
+	MUST(send_exposure_events_recursive(wid));
 }
 
 void on_window_move_event(WINDOW wid, int32_t x, int32_t y)
@@ -149,7 +106,7 @@ void on_window_move_event(WINDOW wid, int32_t x, int32_t y)
 	window.x = x;
 	window.y = y;
 
-	send_window_configure(wid, window);
+	MUST(send_configure_notify(wid));
 }
 
 void on_window_focus_event(WINDOW wid, bool focused)

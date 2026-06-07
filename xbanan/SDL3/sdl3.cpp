@@ -108,7 +108,7 @@ static bool sdl3_initialize()
 	return true;
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(PlatformWindow* parent, WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
 {
 	auto window = TRY(BAN::UniqPtr<SDLWindow>::create());
 
@@ -120,29 +120,19 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(PlatformWin
 	switch (type)
 	{
 		case WindowType::Normal:
-		case WindowType::Utility:
 			flags = SDL_WINDOW_RESIZABLE;
 			break;
+		case WindowType::Utility:
+			flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_UTILITY;
+			break;
 		case WindowType::Popup:
-			flags = SDL_WINDOW_BORDERLESS;
+			flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_UTILITY;
 			break;
 	}
 
-	if (parent == nullptr || type != WindowType::Popup)
-	{
-		if (type != WindowType::Normal)
-			flags |= SDL_WINDOW_UTILITY;
-		window->window = SDL_CreateWindow("", width, height, flags);
-	}
-	else
-	{
-		auto& sdl_parent = *static_cast<SDLWindow*>(parent);
+	flags |= SDL_WINDOW_TRANSPARENT;
 
-		int parent_x, parent_y;
-		SDL_GetWindowPosition(sdl_parent.window, &parent_x, &parent_y);
-
-		window->window = SDL_CreatePopupWindow(sdl_parent.window, x - parent_x, y - parent_y, width, height, flags | SDL_WINDOW_POPUP_MENU);
-	}
+	window->window = SDL_CreateWindow("", width, height, flags);
 
 	if (window->window == nullptr)
 	{
@@ -150,12 +140,17 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(PlatformWin
 		return BAN::Error::from_errno(EFAULT);
 	}
 
+	if (x != 0 || y != 0)
+		SDL_SetWindowPosition(window->window, x, y);
+
 	window->renderer = SDL_CreateRenderer(window->window, nullptr);
 	if (window->renderer == nullptr)
 	{
 		dwarnln("Could not create SDL renderer: {}", SDL_GetError());
 		return BAN::Error::from_errno(EFAULT);
 	}
+
+	SDL_SetRenderDrawColor(window->renderer, 0, 0, 0, 0);
 
 	window->texture = SDL_CreateTexture(window->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
 	if (window->texture == nullptr)
@@ -292,7 +287,7 @@ static void sdl3_poll_events(void*)
 	}
 }
 
-static void sdl3_invalidate(PlatformWindow* window, const uint32_t* src_pixels, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+static void sdl3_invalidate(PlatformWindow* window, const void* src_pixels, uint32_t src_pitch, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
 	auto& sdl_window = *static_cast<SDLWindow*>(window);
 
@@ -317,16 +312,20 @@ static void sdl3_invalidate(PlatformWindow* window, const uint32_t* src_pixels, 
 	for (int32_t y_off = 0; y_off < rect.h; y_off++)
 	{
 		memcpy(
-			static_cast<uint8_t*>(dst_pixels) + y_off * dst_pitch,
-			&src_pixels[(rect.y + y_off) * sdl_window.width + rect.x],
+			static_cast<      uint8_t*>(dst_pixels) + y_off * dst_pitch,
+			static_cast<const uint8_t*>(src_pixels) + y_off * src_pitch,
 			rect.w * sizeof(uint32_t)
 		);
 	}
 
 	SDL_UnlockTexture(sdl_window.texture);
+}
 
+static void sdl3_end_frame(PlatformWindow* window)
+{
+	auto& sdl_window = *static_cast<SDLWindow*>(window);
 	SDL_RenderClear(sdl_window.renderer);
-	SDL_RenderTexture(sdl_window.renderer, sdl_window.texture, NULL, NULL);
+	SDL_RenderTexture(sdl_window.renderer, sdl_window.texture, nullptr, nullptr);
 	SDL_RenderPresent(sdl_window.renderer);
 }
 
@@ -439,6 +438,8 @@ PlatformOps g_platform_ops = {
 	.poll_events          = sdl3_poll_events,
 	.create_window        = sdl3_create_window,
 	.invalidate           = sdl3_invalidate,
+	.begin_frame          = nullptr,
+	.end_frame            = sdl3_end_frame,
 	.request_resize       = sdl3_request_resize,
 	.request_reposition   = sdl3_request_reposition,
 	.request_fullscreen   = sdl3_request_fullscreen,
@@ -506,9 +507,9 @@ static uint32_t sdl3_keycode_to_x_keysym(SDL_Keycode keycode)
 {
 	if (iswprint(keycode))
 	{
-		if ((keycode >= 0x20 && keycode <= 0x7E) || (keycode >= 0xA0 && keycode <= 0xFF))
-			return keycode;
-		return 0x01000000 | keycode;
+		if (keycode >= 0x100)
+			keycode |= 0x01000000;
+		return keycode;
 	}
 
 	switch (keycode)

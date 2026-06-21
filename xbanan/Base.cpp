@@ -856,8 +856,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("CreateWindow");
 			dprintln("  depth:   {}", request.depth);
-			dprintln("  wid:     {}", request.wid);
-			dprintln("  parent:  {}", request.parent);
+			dprintln("  wid:     {h}", request.wid);
+			dprintln("  parent:  {h}", request.parent);
 			dprintln("  x:       {}", request.x);
 			dprintln("  y:       {}", request.y);
 			dprintln("  width:   {}", request.width);
@@ -983,7 +983,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xChangeWindowAttributesReq>(packet).value();
 
 			dprintln("ChangeWindowAttributes");
-			dprintln("  window:    {}", request.window);
+			dprintln("  window:    {h}", request.window);
 			dprintln("  valueMask: {8h}", request.valueMask);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
@@ -1042,7 +1042,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("GetWindowAttributes");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
@@ -1079,7 +1079,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("DestroyWinow");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			(void)TRY_REF(get_window(client_info, wid, opcode));
 			TRY(destroy_window(client_info, wid));
@@ -1091,8 +1091,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xReparentWindowReq>(packet).value();
 
 			dprintln("ReparentWinow");
-			dprintln("  window: {}", request.window);
-			dprintln("  parent: {}", request.parent);
+			dprintln("  window: {h}", request.window);
+			dprintln("  parent: {h}", request.parent);
 			dprintln("  x:      {}", request.x);
 			dprintln("  y:      {}", request.y);
 
@@ -1162,7 +1162,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("MapWindow");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			(void)TRY_REF(get_window(client_info, wid, opcode));
 			TRY(map_window(client_info, wid));
@@ -1174,7 +1174,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("MapSubwindows");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 			for (auto child_wid : window.children)
@@ -1187,7 +1187,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("UnmapWindow");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			(void)TRY_REF(get_window(client_info, wid, opcode));
 			TRY(unmap_window(client_info, wid));
@@ -1199,7 +1199,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("UnmapSubwindows");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 			for (auto child_wid : window.children)
@@ -1212,7 +1212,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xConfigureWindowReq>(packet).value();
 
 			dprintln("ConfigureWindow");
-			dprintln("  window: {}", request.window);
+			dprintln("  window: {h}", request.window);
 			dprintln("  mask:   {4h}", request.mask);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
@@ -1304,7 +1304,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 drawable_id = packet.as_span<const uint32_t>()[1];
 
 			dprintln("GetGeometry");
-			dprintln("  drawable: {}", drawable_id);
+			dprintln("  drawable: {h}", drawable_id);
 
 			auto it = g_objects.find(drawable_id);
 			if (it == g_objects.end() || (it->value->type != Object::Type::Window && it->value->type != Object::Type::Pixmap))
@@ -1371,7 +1371,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const auto wid = packet.as_span<const CARD32>()[1];
 
 			dprintln("QueryTree");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
@@ -1455,7 +1455,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("ChangeProperty");
 			dprintln("  mode:     {}", request.mode);
-			dprintln("  window:   {}", request.window);
+			dprintln("  window:   {h}", request.window);
 			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
 			dprintln("  type:     {}", g_atoms_id_to_name[request.type]);
 			dprintln("  format:   {}", request.format);
@@ -1520,7 +1520,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xDeletePropertyReq>(packet).value();
 
 			dprintln("DeleteProperty");
-			dprintln("  window:   {}", request.window);
+			dprintln("  window:   {h}", request.window);
 			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
@@ -1550,7 +1550,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("GetProperty");
 			dprintln("  c_delete:   {}", request.c_delete);
-			dprintln("  window:     {}", request.window);
+			dprintln("  window:     {h}", request.window);
 			dprintln("  property:   {}", g_atoms_id_to_name[request.property]);
 			dprintln("  type:       {}", request.type);
 			dprintln("  longOffset: {}", request.longOffset);
@@ -1633,7 +1633,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("ListProperties");
-			dprintln("  window:    {}", wid);
+			dprintln("  window:    {h}", wid);
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
@@ -1657,7 +1657,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xSetSelectionOwnerReq>(packet).value();
 
 			dprintln("SetSelectionOwner");
-			dprintln("  window:    {}", request.window);
+			dprintln("  window:    {h}", request.window);
 			dprintln("  selection: {}", g_atoms_id_to_name[request.selection]);
 			dprintln("  time:      {}", request.time);
 
@@ -1713,7 +1713,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xConvertSelectionReq>(packet).value();
 
 			dprintln("ConvertSelection");
-			dprintln("  requestor: {}", request.requestor);
+			dprintln("  requestor: {h}", request.requestor);
 			dprintln("  selection: {}", get_atom_name_safe(request.selection));
 			dprintln("  target:    {}", get_atom_name_safe(request.target));
 			dprintln("  property:  {}", get_atom_name_safe(request.property));
@@ -1800,8 +1800,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("GrabPointer");
 			dprintln("  ownerEvents:  {}", request.ownerEvents);
-			dprintln("  grabWindow:   {}", request.grabWindow);
-			dprintln("  eventMask:    {}", request.eventMask);
+			dprintln("  grabWindow:   {h}", request.grabWindow);
+			dprintln("  eventMask:    {h}", request.eventMask);
 			dprintln("  pointerMode:  {}", request.pointerMode);
 			dprintln("  keyboardMode: {}", request.keyboardMode);
 			dprintln("  confineTo:    {}", request.confineTo);
@@ -1867,7 +1867,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("GrabKeyboard");
 			dprintln("  ownerEvents:  {}", request.ownerEvents);
-			dprintln("  grabWindow:   {}", request.grabWindow);
+			dprintln("  grabWindow:   {h}", request.grabWindow);
 			dprintln("  pointerMode:  {}", request.pointerMode);
 			dprintln("  keyboardMode: {}", request.keyboardMode);
 			dprintln("  time:         {}", request.time);
@@ -1942,7 +1942,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 wid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("QueryPointer");
-			dprintln("  window: {}", wid);
+			dprintln("  window: {h}", wid);
 
 			const auto& window = TRY_REF(get_window(client_info, wid, opcode));
 
@@ -1989,8 +1989,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xTranslateCoordsReq>(packet).value();
 
 			dprintln("TranslateCoords");
-			dprintln("  src_wid: {}", request.srcWid);
-			dprintln("  dst_wid: {}", request.dstWid);
+			dprintln("  src_wid: {h}", request.srcWid);
+			dprintln("  dst_wid: {h}", request.dstWid);
 			dprintln("  src_x:   {}", request.srcX);
 			dprintln("  src_y:   {}", request.srcY);
 
@@ -2018,12 +2018,12 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xWarpPointerReq>(packet).value();
 
 			dprintln("WarpPointer");
-			dprintln("  src_wid: {}", request.srcWid);
+			dprintln("  src_wid: {h}", request.srcWid);
 			dprintln("  src_x:   {}", request.srcX);
 			dprintln("  src_y:   {}", request.srcY);
 			dprintln("  src_w:   {}", request.srcWidth);
 			dprintln("  src_h:   {}", request.srcHeight);
-			dprintln("  dst_wid: {}", request.dstWid);
+			dprintln("  dst_wid: {h}", request.dstWid);
 			dprintln("  dst_x:   {}", request.dstX);
 			dprintln("  dst_y:   {}", request.dstY);
 
@@ -2093,8 +2093,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("CreatePixmap");
 			dprintln("  depth:    {}", request.depth);
-			dprintln("  pid:      {}", request.pid);
-			dprintln("  drawable: {}", request.drawable);
+			dprintln("  pid:      {h}", request.pid);
+			dprintln("  drawable: {h}", request.drawable);
 			dprintln("  width:    {}", request.width);
 			dprintln("  height:   {}", request.height);
 
@@ -2128,7 +2128,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 pid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("FreePixmap");
-			dprintln("  pixmap: {}", pid);
+			dprintln("  pixmap: {h}", pid);
 
 			(void)TRY_REF(get_pixmap(client_info, pid, opcode));
 			client_info.objects.remove(pid);
@@ -2141,7 +2141,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xCreateGCReq>(packet).value();
 
 			dprintln("CreateGC");
-			dprintln("  drawable {}", request.drawable);
+			dprintln("  drawable {h}", request.drawable);
 			dprintln("  gc       {}", request.gc);
 			dprintln("  mask     {8h}", request.mask);
 
@@ -2223,7 +2223,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xChangeGCReq>(packet).value();
 
 			dprintln("ChangeGC");
-			dprintln("  gc:   {}", request.gc);
+			dprintln("  gc:   {h}", request.gc);
 			dprintln("  mask: {8h}", request.mask);
 
 			auto& object = *g_objects[request.gc];
@@ -2287,7 +2287,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xSetClipRectanglesReq>(packet).value();
 
 			dprintln("SetClipRectangles");
-			dprintln("  gc:       {}", request.gc);
+			dprintln("  gc:       {h}", request.gc);
 			dprintln("  ordering: {}", request.ordering);
 			dprintln("  xOrigin:  {}", request.xOrigin);
 			dprintln("  yOrigin:  {}", request.yOrigin);
@@ -2315,7 +2315,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const CARD32 gc = packet.as_span<const uint32_t>()[1];
 
 			dprintln("FreeGC");
-			dprintln("  gc: {}", gc);
+			dprintln("  gc: {h}", gc);
 
 			(void)TRY_REF(get_gc(client_info, gc, opcode));
 			client_info.objects.remove(gc);
@@ -2329,7 +2329,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("ClearArea");
 			dprintln("  exposures: {}", request.exposures);
-			dprintln("  window:    {}", request.window);
+			dprintln("  window:    {h}", request.window);
 			dprintln("  x:         {}", request.x);
 			dprintln("  y:         {}", request.y);
 			dprintln("  width:     {}", request.width);
@@ -2363,9 +2363,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xCopyAreaReq>(packet).value();
 
 			dprintln("CopyArea");
-			dprintln("  srcDrawable: {}", request.srcDrawable);
-			dprintln("  dstDrawable: {}", request.dstDrawable);
-			dprintln("  gc:          {}", request.gc);
+			dprintln("  srcDrawable: {h}", request.srcDrawable);
+			dprintln("  dstDrawable: {h}", request.dstDrawable);
+			dprintln("  gc:          {h}", request.gc);
 			dprintln("  srcX:        {}", request.srcX);
 			dprintln("  srcY:        {}", request.srcY);
 			dprintln("  dstX:        {}", request.dstX);
@@ -2458,8 +2458,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xPutImageReq>(packet).value();
 
 			dprintln("PutImage");
-			dprintln("  drawable: {}", request.drawable);
-			dprintln("  gc:       {}", request.gc);
+			dprintln("  drawable: {h}", request.drawable);
+			dprintln("  gc:       {h}", request.gc);
 			dprintln("  format:   {}", request.format);
 			dprintln("  depth:    {}", request.depth);
 			dprintln("  dstX:     {}", request.dstX);
@@ -2507,7 +2507,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xGetImageReq>(packet).value();
 
 			dprintln("GetImage");
-			dprintln("  drawable:  {}", request.drawable);
+			dprintln("  drawable:  {h}", request.drawable);
 			dprintln("  format:    {}", request.format);
 			dprintln("  x:         {}", request.x);
 			dprintln("  y:         {}", request.y);
@@ -2678,7 +2678,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			auto request = decode<xCreateCursorReq>(packet).value();
 
 			dprintln("CreateCursor");
-			dprintln("  cid:       {}", request.cid);
+			dprintln("  cid:       {h}", request.cid);
 			dprintln("  source:    {}", request.source);
 			dprintln("  mask:      {}", request.mask);
 			dprintln("  foreRed:   {}", request.foreRed);
@@ -2749,7 +2749,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			const auto cid = packet.as_span<const uint32_t>()[1];
 
 			dprintln("FreeCursor");
-			dprintln("  cid:       {}", cid);
+			dprintln("  cid: {h}", cid);
 
 			client_info.objects.remove(cid);
 			g_objects.remove(cid);
@@ -2762,7 +2762,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("QueryBestSize");
 			dprintln("  class:    {}", request.c_class);
-			dprintln("  drawable: {}", request.drawable);
+			dprintln("  drawable: {h}", request.drawable);
 			dprintln("  width:    {}", request.width);
 			dprintln("  height:   {}", request.height);
 

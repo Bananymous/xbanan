@@ -26,6 +26,8 @@ struct BananCursor final : public PlatformCursor
 	int32_t origin_y;
 };
 
+static BAN::UniqPtr<LibGUI::Window> s_dummy_window;
+
 static BAN::ErrorOr<void> bananos_initialize_keymap();
 
 static bool bananos_initialize()
@@ -40,7 +42,9 @@ static bool bananos_initialize()
 		return false;
 	}
 
-	register_display(0, 0, dummy_or_error.value()->width(), dummy_or_error.value()->height());
+	s_dummy_window = dummy_or_error.release_value();
+
+	register_display(0, 0, s_dummy_window->width(), s_dummy_window->height());
 
 	if (auto ret = bananos_initialize_keymap(); ret.is_error())
 	{
@@ -72,6 +76,9 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowTy
 	auto gui_window = TRY(LibGUI::Window::create(width, height, ""_sv, attributes));
 	auto* winp = gui_window.ptr();
 
+	if (x != 0 || y != 0)
+		gui_window->set_position(x, y);
+
 	gui_window->set_close_window_event_callback([wid] {
 		on_window_close_event(wid);
 	});
@@ -83,6 +90,9 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowTy
 	});
 	gui_window->set_window_fullscreen_event_callback([wid](auto event) {
 		on_window_fullscreen_event(wid, event.fullscreen);
+	});
+	gui_window->set_window_move_event_callback([wid](auto event) {
+		on_window_move_event(wid, event.x, event.y);
 	});
 	gui_window->set_mouse_move_event_callback([wid](auto event) {
 		on_mouse_move_event(wid, event.x, event.y);
@@ -130,6 +140,12 @@ static void bananos_request_resize(PlatformWindow* window, uint32_t width, uint3
 	banan_window.window->request_resize(width, height);
 }
 
+static void bananos_request_reposition(PlatformWindow* window, int32_t x, int32_t y)
+{
+	auto& banan_window = *static_cast<BananWindow*>(window);
+	banan_window.window->set_position(x, y);
+}
+
 static void bananos_invalidate(PlatformWindow* window, const void* src_pixels, uint32_t src_pitch, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
@@ -158,6 +174,26 @@ static void bananos_request_fullscreen(PlatformWindow* window, bool fullscreen)
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
 	banan_window.window->set_fullscreen(fullscreen);
+}
+
+static void bananos_query_ponter(int32_t* x, int32_t* y)
+{
+	s_dummy_window->query_cursor_position();
+
+	bool queried { false };
+	s_dummy_window->set_query_pointer_event_callback([&](auto event) {
+		*x = event.x;
+		*y = event.y;
+		queried = true;
+	});
+
+	while (!queried)
+	{
+		s_dummy_window->wait_events();
+		s_dummy_window->poll_events();
+	}
+
+	s_dummy_window->set_query_pointer_event_callback({});
 }
 
 static BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> bananos_create_bitmap_cursor(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y)
@@ -197,10 +233,10 @@ PlatformOps g_platform_ops = {
 	.begin_frame          = nullptr,
 	.end_frame            = bananos_end_frame,
 	.request_resize       = bananos_request_resize,
-	.request_reposition   = nullptr,
+	.request_reposition   = bananos_request_reposition,
 	.request_fullscreen   = bananos_request_fullscreen,
 	.warp_pointer         = nullptr,
-	.query_pointer        = nullptr,
+	.query_pointer        = bananos_query_ponter,
 	.set_pointer_grab     = nullptr,
 	.create_system_cursor = nullptr,
 	.create_bitmap_cursor = bananos_create_bitmap_cursor,

@@ -750,7 +750,7 @@ void update_cursor(WINDOW wid, int32_t x, int32_t y)
 	if (wid == None)
 		return;
 
-	const CURSOR cid = [&wid]() -> CURSOR {
+	const CURSOR cid = [](WINDOW wid) -> CURSOR {
 		for (;;)
 		{
 			const auto& window = g_objects[wid]->object.get<Object::Window>();
@@ -758,7 +758,7 @@ void update_cursor(WINDOW wid, int32_t x, int32_t y)
 				return window.cursor;
 			wid = window.parent;
 		}
-	}();
+	}(wid);
 
 	static CURSOR active_cid = None;
 	if (cid == active_cid)

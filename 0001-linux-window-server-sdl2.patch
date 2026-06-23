@@ -1,20 +1,20 @@
-From c9dd87198ce5262e6ddf6bf3b0c18eb84784d35e Mon Sep 17 00:00:00 2001
+From 8b4747fe0dbc356ee1ff05a9bbc868472e188e2f Mon Sep 17 00:00:00 2001
 From: Oskari Alaranta <oskari.alaranta@bananymous.com>
-Date: Wed, 15 Apr 2026 17:52:54 +0300
+Date: Tue, 23 Jun 2026 23:38:46 +0300
 Subject: [PATCH] linux-window-server-sdl2
 
 ---
  userspace/libraries/LibGUI/Widget/Widget.cpp  |   2 +-
  userspace/libraries/LibGUI/Window.cpp         |   9 +-
  userspace/programs/ProgramLauncher/main.cpp   |   2 +-
- userspace/programs/Terminal/Terminal.cpp      |   4 +-
+ userspace/programs/Terminal/Terminal.cpp      |  10 +-
  .../programs/WindowServer/CMakeLists.txt      |   3 +
  .../programs/WindowServer/Framebuffer.cpp     |  52 +--
  userspace/programs/WindowServer/Window.cpp    |  29 +-
  .../programs/WindowServer/WindowServer.cpp    |  47 ++-
  .../programs/WindowServer/WindowServer.h      |   1 +
  userspace/programs/WindowServer/main.cpp      | 357 ++++++++++++------
- 10 files changed, 340 insertions(+), 166 deletions(-)
+ 10 files changed, 344 insertions(+), 168 deletions(-)
 
 diff --git a/userspace/libraries/LibGUI/Widget/Widget.cpp b/userspace/libraries/LibGUI/Widget/Widget.cpp
 index d6489d87..c532fb04 100644
@@ -30,7 +30,7 @@ index d6489d87..c532fb04 100644
  	}
  
 diff --git a/userspace/libraries/LibGUI/Window.cpp b/userspace/libraries/LibGUI/Window.cpp
-index b4172f70..3a0e9cca 100644
+index f0a11b64..f269594b 100644
 --- a/userspace/libraries/LibGUI/Window.cpp
 +++ b/userspace/libraries/LibGUI/Window.cpp
 @@ -4,9 +4,8 @@
@@ -44,7 +44,7 @@ index b4172f70..3a0e9cca 100644
  #include <sys/socket.h>
  #include <sys/un.h>
  #include <time.h>
-@@ -271,7 +270,7 @@ namespace LibGUI
+@@ -297,7 +296,7 @@ namespace LibGUI
  
  	void Window::cleanup()
  	{
@@ -53,7 +53,7 @@ index b4172f70..3a0e9cca 100644
  		close(m_server_fd);
  		close(m_epoll_fd);
  	}
-@@ -279,7 +278,7 @@ namespace LibGUI
+@@ -305,7 +304,7 @@ namespace LibGUI
  	BAN::ErrorOr<void> Window::handle_resize_event(const EventPacket::ResizeWindowEvent& event)
  	{
  		if (m_framebuffer_smo)
@@ -62,7 +62,7 @@ index b4172f70..3a0e9cca 100644
  		m_framebuffer_smo = nullptr;
  
  		TRY(m_texture.resize(event.width, event.height));
-@@ -287,7 +286,7 @@ namespace LibGUI
+@@ -313,7 +312,7 @@ namespace LibGUI
  		if (m_root_widget)
  			TRY(m_root_widget->set_fixed_geometry({ 0, 0, event.width, event.height }));
  
@@ -85,10 +85,18 @@ index c833c582..0e1cc460 100644
  	const auto full_program_list = get_program_list();
  
 diff --git a/userspace/programs/Terminal/Terminal.cpp b/userspace/programs/Terminal/Terminal.cpp
-index e1bd317d..8a6b5bd0 100644
+index 711d8eab..e334e338 100644
 --- a/userspace/programs/Terminal/Terminal.cpp
 +++ b/userspace/programs/Terminal/Terminal.cpp
-@@ -92,7 +92,7 @@ void Terminal::start_shell()
+@@ -9,6 +9,7 @@
+ #include <fcntl.h>
+ #include <signal.h>
+ #include <stdlib.h>
++#include <sys/ioctl.h>
+ #include <sys/select.h>
+ #include <termios.h>
+ #include <time.h>
+@@ -92,7 +93,7 @@ void Terminal::start_shell()
  		close(pts_slave);
  		close(pts_master);
  
@@ -97,7 +105,7 @@ index e1bd317d..8a6b5bd0 100644
  		exit(1);
  	}
  
-@@ -127,7 +127,7 @@ void Terminal::run()
+@@ -127,7 +128,7 @@ void Terminal::run()
  	m_window->texture().set_bg_color(m_bg_color);
  	m_window->invalidate();
  
@@ -105,6 +113,25 @@ index e1bd317d..8a6b5bd0 100644
 +	m_font = MUST(LibFont::Font::load("./lat0-16.psfu"_sv));
  
  	m_window->set_min_size(m_font.width() * 8, m_font.height() * 2);
+ 
+@@ -147,7 +148,8 @@ void Terminal::run()
+ 			.ws_xpixel = static_cast<unsigned short>(m_window->width()),
+ 			.ws_ypixel = static_cast<unsigned short>(m_window->height()),
+ 		};
+-		if (tcsetwinsize(m_shell_info.pts_master, &winsize) == -1)
++
++		if (ioctl(m_shell_info.pts_master, TIOCSWINSZ, &winsize) == -1)
+ 			perror("tcsetwinsize");
+ 	}
+ 
+@@ -212,7 +214,7 @@ void Terminal::run()
+ 			.ws_xpixel = static_cast<unsigned short>(m_window->width()),
+ 			.ws_ypixel = static_cast<unsigned short>(m_window->height()),
+ 		};
+-		if (tcsetwinsize(m_shell_info.pts_master, &winsize) == -1)
++		if (ioctl(m_shell_info.pts_master, TIOCSWINSZ, &winsize) == -1)
+ 			perror("tcsetwinsize");
+ 	});
  
 diff --git a/userspace/programs/WindowServer/CMakeLists.txt b/userspace/programs/WindowServer/CMakeLists.txt
 index 8fdf79f9..fcaf441d 100644
@@ -266,7 +293,7 @@ index 1e66f522..9759eec9 100644
  	m_client_area.max_x = m_client_area.min_x + width;
  	m_client_area.max_y = m_client_area.min_y + height;
 diff --git a/userspace/programs/WindowServer/WindowServer.cpp b/userspace/programs/WindowServer/WindowServer.cpp
-index 2c67d6c0..600704fd 100644
+index b29b5888..be5b2f76 100644
 --- a/userspace/programs/WindowServer/WindowServer.cpp
 +++ b/userspace/programs/WindowServer/WindowServer.cpp
 @@ -8,19 +8,20 @@
@@ -295,7 +322,7 @@ index 2c67d6c0..600704fd 100644
  {
  	MUST(m_background_image.resize(m_framebuffer.width * m_framebuffer.height, 0xFF101010));
  
-@@ -440,7 +441,7 @@ static void update_volume(const char* new_volume)
+@@ -451,7 +452,7 @@ static void update_volume(const char* new_volume)
  
  void WindowServer::on_key_event(LibInput::KeyEvent event)
  {
@@ -304,7 +331,7 @@ index 2c67d6c0..600704fd 100644
  		m_is_mod_key_held = event.pressed();
  
  	if (event.pressed() && event.key == LibInput::Key::VolumeDown)
-@@ -461,7 +462,7 @@ void WindowServer::on_key_event(LibInput::KeyEvent event)
+@@ -472,7 +473,7 @@ void WindowServer::on_key_event(LibInput::KeyEvent event)
  		pid_t pid = fork();
  		if (pid == 0)
  		{
@@ -313,7 +340,7 @@ index 2c67d6c0..600704fd 100644
  			exit(1);
  		}
  		if (pid == -1)
-@@ -475,7 +476,7 @@ void WindowServer::on_key_event(LibInput::KeyEvent event)
+@@ -486,7 +487,7 @@ void WindowServer::on_key_event(LibInput::KeyEvent event)
  		pid_t pid = fork();
  		if (pid == 0)
  		{
@@ -322,7 +349,7 @@ index 2c67d6c0..600704fd 100644
  			exit(1);
  		}
  		if (pid == -1)
-@@ -1599,16 +1600,34 @@ void WindowServer::sync()
+@@ -1614,16 +1615,34 @@ void WindowServer::sync()
  
  	for (size_t i = 0; i < m_damaged_area_count; i++)
  	{
@@ -364,10 +391,10 @@ index 2c67d6c0..600704fd 100644
  
  Rectangle WindowServer::cursor_area() const
 diff --git a/userspace/programs/WindowServer/WindowServer.h b/userspace/programs/WindowServer/WindowServer.h
-index 94fbc774..bcd7a6b9 100644
+index c31ea125..2d0676bc 100644
 --- a/userspace/programs/WindowServer/WindowServer.h
 +++ b/userspace/programs/WindowServer/WindowServer.h
-@@ -62,6 +62,7 @@ public:
+@@ -64,6 +64,7 @@ public:
  
  	bool is_damaged() const { return m_damaged_area_count > 0 || m_is_bouncing_window; }
  	bool is_stopped() const { return m_is_stopped; }
@@ -376,7 +403,7 @@ index 94fbc774..bcd7a6b9 100644
  private:
  	void on_mouse_move_impl(int32_t new_x, int32_t new_y);
 diff --git a/userspace/programs/WindowServer/main.cpp b/userspace/programs/WindowServer/main.cpp
-index 46f2ba6d..520c8e7d 100644
+index 5b860dc7..4b174cce 100644
 --- a/userspace/programs/WindowServer/main.cpp
 +++ b/userspace/programs/WindowServer/main.cpp
 @@ -10,7 +10,6 @@
@@ -567,7 +594,7 @@ index 46f2ba6d..520c8e7d 100644
  			const int client_fd = events[i].data.fd;
  			if (events[i].events & (EPOLLHUP | EPOLLERR))
  			{
-@@ -500,3 +413,237 @@ int main()
+@@ -505,3 +418,237 @@ int main()
  		}
  	}
  }
@@ -806,5 +833,5 @@ index 46f2ba6d..520c8e7d 100644
 +	}
 +}
 -- 
-2.53.0
+2.54.0
 

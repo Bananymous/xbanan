@@ -344,9 +344,10 @@ static uint32_t bananos_keyevent_to_x_keysym(LibInput::KeyEvent event)
 		case Key::CapsLock:       return XK_Caps_Lock;
 		case Key::LeftShift:      return XK_Shift_L;
 		case Key::LeftCtrl:       return XK_Control_L;
-		case Key::Super:          return XK_Super_L;
+		case Key::LeftSuper:      return XK_Super_L;
 		case Key::LeftAlt:        return XK_Alt_L;
 		case Key::RightAlt:       return XK_Alt_R;
+		case Key::RightSuper:     return XK_Super_R;
 		case Key::RightCtrl:      return XK_Control_R;
 		case Key::RightShift:     return XK_Shift_R;
 		case Key::ArrowUp:        return XK_Up;
@@ -379,10 +380,11 @@ static uint32_t bananos_keyevent_to_x_keysym(LibInput::KeyEvent event)
 		case Key::MediaStop:      return XF86XK_AudioStop;
 		case Key::MediaPrevious:  return XF86XK_AudioPrev;
 		case Key::MediaNext:      return XF86XK_AudioNext;
+		case Key::Application:    return XF86XK_ApplicationRight;
 		default: break;
 	}
 
-	static_assert(static_cast<size_t>(Key::Count) == 145, "update keymap");
+	static_assert(static_cast<size_t>(Key::Count) == 147, "update keymap");
 
 	return 0;
 }

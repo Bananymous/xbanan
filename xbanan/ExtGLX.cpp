@@ -401,6 +401,40 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_GLXCreateContextAttribsARB:
+		{
+			auto request = decode<xGLXCreateContextAttribsARBReq>(packet).value();
+
+			dprintln("GLXCreateContextAttribsARB");
+			dprintln("  context:    {}", request.context);
+			dprintln("  fbconfig:   {}", request.fbconfig);
+			dprintln("  screen:     {}", request.screen);
+			dprintln("  shareList:  {}", request.shareList);
+			dprintln("  isDirect:   {}", request.isDirect);
+			dprintln("  numAttribs: {}", request.numAttribs);
+
+			auto* object = new MyGLXContext({
+				.fbconfig = request.fbconfig,
+				.is_direct = request.isDirect,
+			});
+			ASSERT(object);
+
+			TRY(client_info.objects.insert(request.context));
+			TRY(g_objects.insert(
+				request.context,
+				TRY(BAN::UniqPtr<Object>::create(Object {
+					.type = Object::Type::Extension,
+					.object = Object::Extension {
+						.type_major = s_glx_major_opcode,
+						.type_minor = GLXBadContext,
+						.c_private = object,
+						.destructor = [](Object::Extension& ext) { delete static_cast<MyGLXContext*>(ext.c_private); },
+					},
+				}))
+			));
+
+			break;
+		}
 		default:
 			dwarnln("unsupported glx minor opcode {}", packet[1]);
 			break;

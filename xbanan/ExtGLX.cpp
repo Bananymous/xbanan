@@ -237,10 +237,10 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 					string = "XBANAN";
 					break;
 				case GLX_VERSION:
-					string = "1.4";
+					string = "1.4 XBANAN";
 					break;
 				case GLX_EXTENSIONS:
-					string = "";
+					string = "GLX_ARB_create_context GLX_ARB_create_context_profile";
 					break;
 				default:
 					ASSERT_NOT_REACHED();

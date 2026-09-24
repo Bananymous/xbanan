@@ -92,7 +92,7 @@ void put_image(const PutImageInfo& info)
 				for (int32_t y = min_y; y < max_y; y++)
 				{
 					const auto dst_off = (info.out_y + y) * info.out_w + (info.out_x + min_x);
-					const auto src_off = (info. in_y + y) * info. in_w + (info. in_x + min_y);
+					const auto src_off = (info. in_y + y) * info. in_w + (info. in_x + min_x);
 					memcpy(&out_data_u32[dst_off], &in_data_u32[src_off], bytes_per_row);
 				}
 			}

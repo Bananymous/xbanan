@@ -770,6 +770,50 @@ void update_cursor(WINDOW wid, int32_t x, int32_t y)
 	active_cid = cid;
 }
 
+static void update_window_title(const Object::Window& window, BAN::ConstByteSpan title)
+{
+	if (g_platform_ops.set_title == nullptr)
+		return;
+
+	auto* platform_window = get_platform_window(window);
+	if (platform_window == nullptr)
+		return;
+
+	const char* title_cstr = reinterpret_cast<const char*>(title.data());
+	g_platform_ops.set_title(platform_window, title_cstr, strnlen(title_cstr, title.size()));
+}
+
+static void on_window_property_changed(const Object::Window& window, Atom property_name, const Property& property)
+{
+	static const CARD32      WM_NAME = g_atoms_name_to_id[     "WM_NAME"_sv];
+	static const CARD32 _NET_WM_NAME = g_atoms_name_to_id["_NET_WM_NAME"_sv];
+	if (property_name != WM_NAME && property_name != _NET_WM_NAME)
+		return;
+
+	if (property_name == WM_NAME && window.properties.contains(_NET_WM_NAME))
+		return;
+
+	update_window_title(window, property.data.span());
+}
+
+static void on_window_property_deleted(const Object::Window& window, Atom property_name)
+{
+	static const CARD32      WM_NAME = g_atoms_name_to_id[     "WM_NAME"_sv];
+	static const CARD32 _NET_WM_NAME = g_atoms_name_to_id["_NET_WM_NAME"_sv];
+	if (property_name != WM_NAME && property_name != _NET_WM_NAME)
+		return;
+
+	if (property_name == WM_NAME && window.properties.contains(_NET_WM_NAME))
+		return;
+
+	BAN::ConstByteSpan new_title;
+	if (property_name == _NET_WM_NAME)
+		if (auto it = window.properties.find(WM_NAME); it != window.properties.end())
+			new_title = it->value.data.span();
+
+	update_window_title(window, new_title);
+}
+
 static void on_root_client_message(const xEvent& event)
 {
 	static const CARD32 _NET_WM_STATE            = g_atoms_name_to_id["_NET_WM_STATE"_sv];
@@ -1502,6 +1546,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					ASSERT_NOT_REACHED();
 			}
 
+			on_window_property_changed(window, request.property, property);
+
 			xEvent event = { .u = {
 				.property = {
 					.window = request.window,
@@ -1530,6 +1576,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				break;
 
 			window.properties.remove(it);
+
+			on_window_property_deleted(window, request.property);
 
 			xEvent event = { .u = {
 				.property = {

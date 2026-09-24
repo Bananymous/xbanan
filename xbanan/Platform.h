@@ -77,6 +77,8 @@ struct PlatformOps
 	BAN::ErrorOr<BAN::UniqPtr<PlatformCursor>> (*create_bitmap_cursor)(const uint32_t* pixels, uint32_t width, uint32_t height, int32_t origin_x, int32_t origin_y);
 	/* Set custom cursor */
 	void (*set_cursor)(PlatformWindow*, PlatformCursor*);
+	/* Set window title */
+	void (*set_title)(PlatformWindow*, const char*, size_t);
 };
 extern PlatformOps g_platform_ops;
 

@@ -69,7 +69,7 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowTy
 
 	auto attributes = LibGUI::Window::default_attributes;
 	attributes.shown = true;
-	attributes.title_bar = false;
+	attributes.title_bar = (type == WindowType::Normal);
 	attributes.resizable = true;
 	attributes.alpha_channel = true;
 
@@ -225,6 +225,12 @@ static void bananos_set_cursor(PlatformWindow* window, PlatformCursor* cursor)
 	}
 }
 
+static void bananos_set_title(PlatformWindow* window, const char* title, size_t title_len)
+{
+	auto& banan_window = *static_cast<BananWindow*>(window);
+	banan_window.window->set_title(BAN::StringView { title, title_len });
+}
+
 PlatformOps g_platform_ops = {
 	.initialize           = bananos_initialize,
 	.poll_events          = bananos_poll_events,
@@ -241,6 +247,7 @@ PlatformOps g_platform_ops = {
 	.create_system_cursor = nullptr,
 	.create_bitmap_cursor = bananos_create_bitmap_cursor,
 	.set_cursor           = bananos_set_cursor,
+	.set_title            = bananos_set_title,
 };
 
 #include <LibInput/KeyboardLayout.h>

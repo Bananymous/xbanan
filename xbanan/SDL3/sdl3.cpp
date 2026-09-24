@@ -433,6 +433,18 @@ static void sdl3_set_cursor(PlatformWindow*, PlatformCursor* cursor)
 	}
 }
 
+static void sdl3_set_title(PlatformWindow* window, const char* title, size_t title_len)
+{
+	char* title_null_terminated = strndup(title, title_len);
+	if (title_null_terminated == nullptr)
+		return;
+
+	auto& sdl_window = *static_cast<SDLWindow*>(window);
+	SDL_SetWindowTitle(sdl_window.window, title_null_terminated);
+
+	free(title_null_terminated);
+}
+
 PlatformOps g_platform_ops = {
 	.initialize           = sdl3_initialize,
 	.poll_events          = sdl3_poll_events,
@@ -449,6 +461,7 @@ PlatformOps g_platform_ops = {
 	.create_system_cursor = sdl3_create_system_cursor,
 	.create_bitmap_cursor = sdl3_create_bitmap_cursor,
 	.set_cursor           = sdl3_set_cursor,
+	.set_title            = sdl3_set_title,
 };
 
 static uint32_t sdl3_keycode_to_x_keysym(SDL_Keycode keycode);

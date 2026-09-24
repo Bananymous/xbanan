@@ -61,10 +61,8 @@ static void bananos_poll_events(void* window)
 	banan_window.window->poll_events();
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, const char* title, size_t title_len)
 {
-	(void)type;
-
 	auto window = TRY(BAN::UniqPtr<BananWindow>::create());
 
 	auto attributes = LibGUI::Window::default_attributes;
@@ -73,7 +71,7 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowTy
 	attributes.resizable = true;
 	attributes.alpha_channel = true;
 
-	auto gui_window = TRY(LibGUI::Window::create(width, height, ""_sv, attributes));
+	auto gui_window = TRY(LibGUI::Window::create(width, height, { title, title_len }, attributes));
 	auto* winp = gui_window.ptr();
 
 	if (x != 0 || y != 0)

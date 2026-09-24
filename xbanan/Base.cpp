@@ -535,6 +535,16 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 		for (auto& pixel : window.double_buffer)
 			pixel = window.background;
 
+		const auto title = [&window]() -> BAN::ConstByteSpan {
+			static const CARD32      WM_NAME = g_atoms_name_to_id[     "WM_NAME"_sv];
+			static const CARD32 _NET_WM_NAME = g_atoms_name_to_id["_NET_WM_NAME"_sv];
+			if (auto it = window.properties.find(_NET_WM_NAME); it != window.properties.end())
+				return it->value.data.span();
+			if (auto it = window.properties.find(WM_NAME); it != window.properties.end())
+				return it->value.data.span();
+			return {};
+		}();
+
 		const auto type = get_plaform_window_info(window);
 		window.platform_window = TRY(g_platform_ops.create_window(
 			type,
@@ -542,7 +552,9 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 			window.x,
 			window.y,
 			window.width,
-			window.height
+			window.height,
+			reinterpret_cast<const char*>(title.data()),
+			title.size()
 		));
 	}
 

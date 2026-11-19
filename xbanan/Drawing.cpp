@@ -36,11 +36,9 @@ static void draw_segment(DrawSegmentInfo& info)
 
 	if (width == 0)
 	{
-		const auto is_in_bounds =
-			[&info](int32_t x, int32_t y) -> bool
-			{
-				return x >= 0 && y >= 0 && x < info.out_w && y < info.out_h;
-			};
+		const auto is_in_bounds = [&info](int32_t x, int32_t y) -> bool {
+			return x >= 0 && y >= 0 && x < info.out_w && y < info.out_h;
+		};
 
 		int32_t x = info.x1;
 		int32_t y = info.y1;
@@ -102,6 +100,56 @@ static void draw_segment(DrawSegmentInfo& info)
 	info.max_y = BAN::Math::max(info.max_y, max_y);
 }
 
+BAN::ErrorOr<void> poly_point(Client& client_info, BAN::ConstByteSpan packet)
+{
+	auto request = decode<xPolyPointReq>(packet).value();
+
+	dprintln("PolyPoint");
+	dprintln("  drawable:  {h}", request.drawable);
+	dprintln("  gc:        {}", request.gc);
+	dprintln("  coordMode: {}", request.coordMode);
+
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyPoint));
+
+	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyPoint));
+
+	if (packet.size() < sizeof(xPoint))
+		return {};
+
+	int32_t min_x = INT32_MAX, max_x = INT32_MIN;
+	int32_t min_y = INT32_MAX, max_y = INT32_MIN;
+
+	xPoint prev {};
+	while (packet.size() >= sizeof(xPoint))
+	{
+		auto point = decode<xPoint>(packet).value();
+		if (request.coordMode == CoordModePrevious)
+		{
+			point.x += prev.x;
+			point.y += prev.y;
+		}
+		prev = point;
+
+		if (point.x < 0 || point.y < 0 || point.x >= out_w || point.y >= out_h)
+			continue;
+		if (gc.is_clipped(point.x, point.y))
+			continue;
+
+		min_x = BAN::Math::min<int32_t>(min_x, point.x);
+		min_y = BAN::Math::min<int32_t>(min_y, point.y);
+		max_x = BAN::Math::max<int32_t>(max_x, point.x);
+		max_y = BAN::Math::max<int32_t>(max_y, point.y);
+
+		out_data_u32[point.y * out_w + point.x] = gc.foreground;
+	}
+
+	// TODO: should we invalidate bounding box or once per point?
+	if (g_objects[request.drawable]->type == Object::Type::Window)
+		invalidate_window(request.drawable, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);
+
+	return {};
+}
+
 BAN::ErrorOr<void> poly_line(Client& client_info, BAN::ConstByteSpan packet)
 {
 	auto request = decode<xPolyLineReq>(packet).value();
@@ -143,7 +191,6 @@ BAN::ErrorOr<void> poly_line(Client& client_info, BAN::ConstByteSpan packet)
 		info.y1 = prev.y;
 		info.x2 = next.x;
 		info.y2 = next.y;
-
 		draw_segment(info);
 
 		prev = next;
@@ -198,6 +245,82 @@ BAN::ErrorOr<void> poly_segment(Client& client_info, BAN::ConstByteSpan packet)
 	return {};
 }
 
+BAN::ErrorOr<void> poly_rectangle(Client& client_info, BAN::ConstByteSpan packet)
+{
+	auto request = decode<xPolyRectangleReq>(packet).value();
+
+	dprintln("PolyRectangle");
+	dprintln("  drawable: {h}", request.drawable);
+	dprintln("  gc:       {}", request.gc);
+
+	auto [out_data_u32, out_w, out_h, _] = TRY(get_drawable_info(client_info, request.drawable, X_PolyRectangle));
+
+	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyRectangle));
+
+	DrawSegmentInfo info {
+		.out_data_u32 = out_data_u32,
+		.out_w = out_w,
+		.out_h = out_h,
+		.min_x = INT32_MAX,
+		.max_x = INT32_MIN,
+		.min_y = INT32_MAX,
+		.max_y = INT32_MIN,
+		.gc = gc,
+	};
+
+	while (packet.size() >= sizeof(xRectangle))
+	{
+		auto rect = decode<xRectangle>(packet).value();
+
+		// tl -> tr
+		info.x1 = rect.x;
+		info.y1 = rect.y;
+		info.x2 = rect.x + rect.width;
+		info.y2 = rect.y;
+		draw_segment(info);
+
+		// tl -> bl
+		info.x1 = rect.x;
+		info.y1 = rect.y;
+		info.x2 = rect.x;
+		info.y2 = rect.y + rect.height;
+		draw_segment(info);
+
+		// tr -> br
+		info.x1 = rect.x + rect.width;
+		info.y1 = rect.y;
+		info.x2 = rect.x + rect.width;
+		info.y2 = rect.y + rect.height;
+		draw_segment(info);
+
+		// bl -> br
+		info.x1 = rect.x;
+		info.y1 = rect.y + rect.height;
+		info.x2 = rect.x + rect.width;
+		info.y2 = rect.y + rect.height;
+		draw_segment(info);
+	}
+
+	// TODO: should we invalidate bounding box, once per rect or once per line?
+	if (g_objects[request.drawable]->type == Object::Type::Window)
+		invalidate_window(request.drawable, info.min_x, info.min_y, info.max_x - info.min_x + 1, info.max_y - info.min_y + 1);
+
+	return {};
+}
+
+BAN::ErrorOr<void> poly_arc(Client& client_info, BAN::ConstByteSpan packet)
+{
+	(void)client_info;
+
+	auto request = decode<xPolyArcReq>(packet).value();
+
+	dwarnln("TODO: PolyArc");
+	dwarnln("TODO:   drawable: {h}", request.drawable);
+	dwarnln("TODO:   gc:       {}", request.gc);
+
+	return {};
+}
+
 BAN::ErrorOr<void> fill_poly(Client& client_info, BAN::ConstByteSpan packet)
 {
 	auto request = decode<xFillPolyReq>(packet).value();
@@ -246,7 +369,7 @@ BAN::ErrorOr<void> fill_poly(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			const auto& p1 = points[i];
 			const auto& p2 = points[(i + 1) % points.size()];
-			if (!(BAN::Math::min(p1.y, p2.y) <= y && y < BAN::Math::max(p1.y, p2.y)))
+			if (y < BAN::Math::min(p1.y, p2.y) || y >= BAN::Math::max(p1.y, p2.y))
 				continue;
 
 			const float t = static_cast<float>(y - p1.y) / (p2.y - p1.y);
@@ -286,20 +409,13 @@ BAN::ErrorOr<void> poly_fill_rectangle(Client& client_info, BAN::ConstByteSpan p
 	const auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyFillRectangle));
 	const auto foreground = gc.foreground;
 
-	dprintln("  rects:");
 	while (!packet.empty())
 	{
 		const auto rect = decode<xRectangle>(packet).value();
-
-		dprintln("    rect");
-		dprintln("      x, y: {},{}", rect.x, rect.y);
-		dprintln("      w, h: {},{}", rect.width, rect.height);
-
 		const int32_t min_x = BAN::Math::max<int32_t>(rect.x, 0);
 		const int32_t min_y = BAN::Math::max<int32_t>(rect.y, 0);
-		const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width, out_w);
+		const int32_t max_x = BAN::Math::min<int32_t>(rect.x + rect.width,  out_w);
 		const int32_t max_y = BAN::Math::min<int32_t>(rect.y + rect.height, out_h);
-
 		if (min_x >= max_x || min_y >= max_y)
 			continue;
 
@@ -328,32 +444,21 @@ BAN::ErrorOr<void> poly_fill_arc(Client& client_info, BAN::ConstByteSpan packet)
 	auto& gc = TRY_REF(get_gc(client_info, request.gc, X_PolyFillArc));
 	const auto foreground = gc.foreground;
 
-	const auto normalize_angle =
-		[](float f) -> float
-		{
-			const float radians = f * (2.0f * BAN::numbers::pi_v<float> / 64.0f / 360.0f);
-			const float mod = BAN::Math::fmod(radians, 2.0f * BAN::numbers::pi_v<float>);
-			if (mod < 0.0f)
-				return mod + 2.0f * BAN::numbers::pi_v<float>;
-			return mod;
-		};
+	const auto normalize_angle = [](float f) -> float {
+		const float radians = f * (2.0f * BAN::numbers::pi_v<float> / 64.0f / 360.0f);
+		const float mod = BAN::Math::fmod(radians, 2.0f * BAN::numbers::pi_v<float>);
+		if (mod < 0.0f)
+			return mod + 2.0f * BAN::numbers::pi_v<float>;
+		return mod;
+	};
 
-	dprintln("  arcs:");
 	while (!packet.empty())
 	{
 		const auto arc = decode<xArc>(packet).value();
-
-		dprintln("    arc");
-		dprintln("      x,  y:  {},{}", arc.x, arc.y);
-		dprintln("      w,  h:  {},{}", arc.width, arc.height);
-		dprintln("      a1, a2: {},{}", arc.angle1, arc.angle2);
-
-		const int32_t min_x = BAN::Math::max<int32_t>(0, arc.x);
-		const int32_t min_y = BAN::Math::max<int32_t>(0, arc.y);
-
-		const int32_t max_x = BAN::Math::min<int32_t>(out_w, arc.x + arc.width);
-		const int32_t max_y = BAN::Math::min<int32_t>(out_h, arc.y + arc.height);
-
+		const int32_t min_x = BAN::Math::max<int32_t>(arc.x, 0);
+		const int32_t min_y = BAN::Math::max<int32_t>(arc.y, 0);
+		const int32_t max_x = BAN::Math::min<int32_t>(arc.x + arc.width,  out_w);
+		const int32_t max_y = BAN::Math::min<int32_t>(arc.y + arc.height, out_h);
 		if (min_x >= max_x || min_y >= max_y)
 			continue;
 
@@ -377,7 +482,7 @@ BAN::ErrorOr<void> poly_fill_arc(Client& client_info, BAN::ConstByteSpan packet)
 				const int32_t dx = x - cx;
 				const int32_t dy = cy - y;
 
-				if ((float)(dx*dx) / (rx*rx) + (float)(dy*dy) / (ry*ry) > 1.0f)
+				if (static_cast<float>(dx*dx) / (rx*rx) + static_cast<float>(dy*dy) / (ry*ry) > 1.0f)
 					continue;
 
 				if (!full_circle)

@@ -13,6 +13,11 @@ set(XBANAN_SOURCES
 	SafeGetters.cpp
 )
 
+set(XBANAN_LIBS
+	ban
+	libdeflate
+)
+
 set(FONT_PATH ${CMAKE_SOURCE_DIR}/fonts CACHE STRING "path to X11 fonts")
 
 option(ENABLE_GLX "enable glx extension" ON)
@@ -27,23 +32,16 @@ endif()
 
 if(PLATFORM STREQUAL "banan-os")
 	list(APPEND XBANAN_SOURCES banan-os/banan-os.cpp)
+	list(APPEND XBANAN_LIBS libgui libinput)
 elseif(PLATFORM STREQUAL "SDL3")
+	find_package(SDL3 REQUIRED)
 	list(APPEND XBANAN_SOURCES SDL3/sdl3.cpp)
+	list(APPEND XBANAN_LIBS SDL3::SDL3)
 endif()
 
 add_executable(xbanan ${XBANAN_SOURCES})
-banan_link_library(xbanan ban)
-banan_link_library(xbanan libdeflate)
 
 target_compile_definitions(xbanan PRIVATE FONT_PATH="${FONT_PATH}")
-
-if(PLATFORM STREQUAL "banan-os")
-	banan_link_library(xbanan libgui)
-	banan_link_library(xbanan libinput)
-elseif(PLATFORM STREQUAL "SDL3")
-	find_package(SDL3 REQUIRED)
-	banan_link_library(xbanan SDL3::SDL3)
-endif()
 
 target_compile_options(xbanan PRIVATE -Wall -Wextra)
 target_compile_options(xbanan PRIVATE
@@ -52,5 +50,9 @@ target_compile_options(xbanan PRIVATE
 	-Wno-unused-variable
 	-Wno-unused-but-set-variable
 )
+
+foreach(lib ${XBANAN_LIBS})
+	banan_link_library(xbanan ${lib})
+endforeach()
 
 install(TARGETS xbanan OPTIONAL)

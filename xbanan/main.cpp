@@ -243,6 +243,10 @@ int main()
 			MUST(g_atoms_id_to_name.insert(atom, #name##_sv)); \
 			MUST(g_atoms_name_to_id.insert(#name##_sv, atom)); \
 		} while (0)
+	APPEND_ATOM_CUSTOM(CLIPBOARD);
+	APPEND_ATOM_CUSTOM(TARGETS);
+	APPEND_ATOM_CUSTOM(TEXT);
+	APPEND_ATOM_CUSTOM(UTF8_STRING);
 	APPEND_ATOM_CUSTOM(WM_PROTOCOLS);
 	APPEND_ATOM_CUSTOM(WM_DELETE_WINDOW);
 	APPEND_ATOM_CUSTOM(_NET_WM_NAME);

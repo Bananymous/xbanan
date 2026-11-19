@@ -2,6 +2,7 @@
 
 #include "Types.h"
 
+#include <BAN/String.h>
 #include <BAN/StringView.h>
 #include <BAN/UniqPtr.h>
 
@@ -80,6 +81,10 @@ struct PlatformOps
 	void (*set_cursor)(PlatformWindow*, PlatformCursor*);
 	/* Set window title */
 	void (*set_title)(PlatformWindow*, BAN::StringView);
+	/* Set system clipboard text */
+	void (*set_clipboard_text)(BAN::StringView);
+	/* Get system clipboard text */
+	BAN::String (*get_clipboard_text)();
 };
 extern PlatformOps g_platform_ops;
 

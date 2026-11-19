@@ -1510,12 +1510,40 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("ChangeProperty");
 			dprintln("  mode:     {}", request.mode);
 			dprintln("  window:   {h}", request.window);
-			dprintln("  property: {}", g_atoms_id_to_name[request.property]);
-			dprintln("  type:     {}", g_atoms_id_to_name[request.type]);
+			dprintln("  property: {}", get_atom_name_safe(request.property));
+			dprintln("  type:     {}", get_atom_name_safe(request.type));
 			dprintln("  format:   {}", request.format);
 			dprintln("  nUnits:   {}", request.nUnits);
 
 			ASSERT(request.format == 8 || request.format == 16 || request.format == 32);
+
+			if (g_platform_ops.set_clipboard_text && request.window == g_root.windowId && get_atom_name_safe(request.property) == "CLIPBOARD"_sv)
+			{
+				auto& selection = g_selections[request.property];
+				if (client_info.fd != (selection.owner >> 20))
+					break;
+
+				if (request.format == 8 && request.type == XA_STRING)
+					g_platform_ops.set_clipboard_text({ packet.as_span<const char>().data(), request.nUnits });
+
+				xEvent xevent = { .u = {
+					.selectionClear = {
+						.time = selection.time,
+						.window = selection.owner,
+						.atom = request.property,
+					}
+				}};
+				xevent.u.u.type = SelectionClear;
+				xevent.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info, xevent));
+
+				selection = {
+					.time = static_cast<CARD32>(time(0)),
+					.owner = None,
+				};
+
+				break;
+			}
 
 			auto& window = TRY_REF(get_window(client_info, request.window, opcode));
 
@@ -1716,7 +1744,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			dprintln("SetSelectionOwner");
 			dprintln("  window:    {h}", request.window);
-			dprintln("  selection: {}", g_atoms_id_to_name[request.selection]);
+			dprintln("  selection: {}", get_atom_name_safe(request.selection));
 			dprintln("  time:      {}", request.time);
 
 			if (request.time == CurrentTime)
@@ -1742,6 +1770,23 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.owner = request.window,
 			}));
 
+			if (g_platform_ops.set_clipboard_text && get_atom_name_safe(request.selection) == "CLIPBOARD"_sv)
+			{
+				xEvent xevent = { .u = {
+					.selectionRequest = {
+						.time = request.time,
+						.owner = request.window,
+						.requestor = g_root.windowId,
+						.selection = request.selection,
+						.target = XA_STRING,
+						.property = request.selection,
+					}
+				}};
+				xevent.u.u.type = SelectionRequest;
+				xevent.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info, xevent));
+			}
+
 			break;
 		}
 		case X_GetSelectionOwner:
@@ -1753,8 +1798,13 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			TRY(validate_atom(atom));
 
-			auto it = g_selections.find(atom);
-			const WINDOW owner = (it == g_selections.end()) ? None : it->value.owner;
+			const WINDOW owner = [&]() -> WINDOW {
+				if (auto it = g_selections.find(atom); it != g_selections.end() && it->value.owner != None)
+					return it->value.owner;
+				if (g_platform_ops.get_clipboard_text)
+					return g_root.windowId;
+				return None;
+			}();
 
 			xGetSelectionOwnerReply reply {
 				.type = X_Reply,
@@ -1777,8 +1827,67 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			dprintln("  property:  {}", get_atom_name_safe(request.property));
 			dprintln("  time:      {}", request.time);
 
-			auto it = g_selections.find(request.selection);
-			if (it == g_selections.end() || it->value.owner == None)
+			auto selection_it = g_selections.find(request.selection);
+
+			if (g_platform_ops.get_clipboard_text && get_atom_name_safe(request.selection) == "CLIPBOARD"_sv && (selection_it == g_selections.end() || selection_it->value.owner == None))
+			{
+				static const CARD32 STRING      = g_atoms_name_to_id["STRING"_sv];
+				static const CARD32 TARGETS     = g_atoms_name_to_id["TARGETS"_sv];
+				static const CARD32 TEXT        = g_atoms_name_to_id["TEXT"_sv];
+				static const CARD32 UTF8_STRING = g_atoms_name_to_id["UTF8_STRING"_sv];
+
+				xEvent xevent = { .u = {
+					.selectionNotify = {
+						.time = request.time,
+						.requestor = request.requestor,
+						.selection = request.selection,
+						.target = request.target,
+						.property = None,
+					}
+				}};
+
+				auto& window = TRY_REF(get_window(client_info, request.requestor, X_ConvertSelection));
+
+				// TODO: If the specified property is None, the requestor is an obsolete client.
+				//       Owners are encouraged to support these clients by using the specified target atom as the property name to be used for the reply. 
+				if (request.target == TARGETS)
+				{
+					auto it = window.properties.find(request.property);
+					if (it == window.properties.end())
+						it = TRY(window.properties.emplace(request.property));
+	
+					TRY(it->value.data.resize(3 * sizeof(CARD32)));
+					reinterpret_cast<CARD32*>(it->value.data.data())[0] = UTF8_STRING;
+					reinterpret_cast<CARD32*>(it->value.data.data())[1] = TEXT;
+					reinterpret_cast<CARD32*>(it->value.data.data())[2] = STRING;
+
+					it->value.format = 32;
+					it->value.type = XA_ATOM;
+
+					xevent.u.selectionNotify.property = request.property;
+				}
+				else if (request.target == UTF8_STRING || request.target == TEXT || request.target == STRING)
+				{
+					auto it = window.properties.find(request.property);
+					if (it == window.properties.end())
+						it = TRY(window.properties.emplace(request.property));
+
+					auto text = g_platform_ops.get_clipboard_text();
+
+					TRY(it->value.data.resize(text.size()));
+					memcpy(it->value.data.data(), text.data(), text.size());
+
+					it->value.format = 8;
+					it->value.type = request.target;
+
+					xevent.u.selectionNotify.property = request.property;
+				}
+
+				xevent.u.u.type = SelectionNotify;
+				xevent.u.u.sequenceNumber = client_info.sequence;
+				TRY(encode(client_info, xevent));
+			}
+			else if (selection_it == g_selections.end() || selection_it->value.owner == None)
 			{
 				xEvent xevent = { .u = {
 					.selectionNotify = {
@@ -1798,7 +1907,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				xEvent xevent = { .u = {
 					.selectionRequest = {
 						.time = request.time,
-						.owner = it->value.owner,
+						.owner = selection_it->value.owner,
 						.requestor = request.requestor,
 						.selection = request.selection,
 						.target = request.target,

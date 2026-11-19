@@ -4,6 +4,7 @@
 
 #include <BAN/Vector.h>
 
+#include <LibClipboard/Clipboard.h>
 #include <LibGUI/Window.h>
 
 struct BananWindow final : public PlatformWindow
@@ -229,6 +230,22 @@ static void bananos_set_title(PlatformWindow* window, BAN::StringView title)
 	banan_window.window->set_title(title);
 }
 
+static void bananos_set_clipboard_text(BAN::StringView text)
+{
+	auto result = LibClipboard::Clipboard::set_clipboard_text(text);
+	if (result.is_error())
+		dwarnln("Could not set clipboard: {}", result.error());
+}
+
+static BAN::String bananos_get_clipboard_text()
+{
+	auto result = LibClipboard::Clipboard::get_clipboard_text();
+	if (!result.is_error())
+		return result.release_value();
+	dwarnln("Could not get clipboard: {}", result.error());
+	return {};
+}
+
 PlatformOps g_platform_ops = {
 	.initialize           = bananos_initialize,
 	.poll_events          = bananos_poll_events,
@@ -246,6 +263,8 @@ PlatformOps g_platform_ops = {
 	.create_bitmap_cursor = bananos_create_bitmap_cursor,
 	.set_cursor           = bananos_set_cursor,
 	.set_title            = bananos_set_title,
+	.set_clipboard_text   = bananos_set_clipboard_text,
+	.get_clipboard_text   = bananos_get_clipboard_text,
 };
 
 #include <LibInput/KeyboardLayout.h>

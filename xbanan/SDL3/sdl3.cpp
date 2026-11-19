@@ -451,6 +451,30 @@ static void sdl3_set_title(PlatformWindow* window, BAN::StringView title)
 	free(title_null_terminated);
 }
 
+static void sdl3_set_clipboard_text(BAN::StringView text)
+{
+	char* text_null_terminated = strndup(text.data(), text.size());
+	if (text_null_terminated == nullptr)
+		return;
+
+	SDL_SetClipboardText(text_null_terminated);
+
+	free(text_null_terminated);
+}
+
+static BAN::String sdl3_get_clipboard_text()
+{
+	char* text = SDL_GetClipboardText();
+	if (*text == '\0')
+		return {};
+
+	auto result = BAN::String(text);
+
+	SDL_free(text);
+
+	return result;
+}
+
 PlatformOps g_platform_ops = {
 	.initialize           = sdl3_initialize,
 	.poll_events          = sdl3_poll_events,
@@ -468,6 +492,8 @@ PlatformOps g_platform_ops = {
 	.create_bitmap_cursor = sdl3_create_bitmap_cursor,
 	.set_cursor           = sdl3_set_cursor,
 	.set_title            = sdl3_set_title,
+	.set_clipboard_text   = sdl3_set_clipboard_text,
+	.get_clipboard_text   = sdl3_get_clipboard_text,
 };
 
 static uint32_t sdl3_keycode_to_x_keysym(SDL_Keycode keycode);

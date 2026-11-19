@@ -40,7 +40,7 @@ endif()
 
 if(PLATFORM STREQUAL "banan-os")
 	list(APPEND XBANAN_SOURCES banan-os/banan-os.cpp)
-	list(APPEND XBANAN_LIBS libgui libinput)
+	list(APPEND XBANAN_LIBS libgui libinput libclipboard)
 elseif(PLATFORM STREQUAL "SDL3")
 	find_package(SDL3 REQUIRED)
 	list(APPEND XBANAN_SOURCES SDL3/sdl3.cpp)

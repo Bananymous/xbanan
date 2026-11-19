@@ -553,8 +553,7 @@ static BAN::ErrorOr<void> map_window(Client& client_info, WINDOW wid)
 			window.y,
 			window.width,
 			window.height,
-			reinterpret_cast<const char*>(title.data()),
-			title.size()
+			{ title.as_span<const char>().data(), title.size() }
 		));
 	}
 
@@ -791,8 +790,7 @@ static void update_window_title(const Object::Window& window, BAN::ConstByteSpan
 	if (platform_window == nullptr)
 		return;
 
-	const char* title_cstr = reinterpret_cast<const char*>(title.data());
-	g_platform_ops.set_title(platform_window, title_cstr, strnlen(title_cstr, title.size()));
+	g_platform_ops.set_title(platform_window, { title.as_span<const char>().data(), title.size() });
 }
 
 static void on_window_property_changed(const Object::Window& window, Atom property_name, const Property& property)

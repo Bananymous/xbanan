@@ -61,17 +61,17 @@ static void bananos_poll_events(void* window)
 	banan_window.window->poll_events();
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, const char* title, size_t title_len)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> bananos_create_window(WindowType, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, BAN::StringView title)
 {
 	auto window = TRY(BAN::UniqPtr<BananWindow>::create());
 
 	auto attributes = LibGUI::Window::default_attributes;
 	attributes.shown = true;
-	attributes.title_bar = (type == WindowType::Normal);
+	attributes.title_bar = false;
 	attributes.resizable = true;
 	attributes.alpha_channel = true;
 
-	auto gui_window = TRY(LibGUI::Window::create(width, height, { title, title_len }, attributes));
+	auto gui_window = TRY(LibGUI::Window::create(width, height, title, attributes));
 	auto* winp = gui_window.ptr();
 
 	if (x != 0 || y != 0)
@@ -223,10 +223,10 @@ static void bananos_set_cursor(PlatformWindow* window, PlatformCursor* cursor)
 	}
 }
 
-static void bananos_set_title(PlatformWindow* window, const char* title, size_t title_len)
+static void bananos_set_title(PlatformWindow* window, BAN::StringView title)
 {
 	auto& banan_window = *static_cast<BananWindow*>(window);
-	banan_window.window->set_title(BAN::StringView { title, title_len });
+	banan_window.window->set_title(title);
 }
 
 PlatformOps g_platform_ops = {

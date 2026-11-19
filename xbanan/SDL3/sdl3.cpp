@@ -108,7 +108,7 @@ static bool sdl3_initialize()
 	return true;
 }
 
-static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, const char* title, size_t title_len)
+static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(WindowType type, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, BAN::StringView title)
 {
 	auto window = TRY(BAN::UniqPtr<SDLWindow>::create());
 
@@ -132,7 +132,7 @@ static BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> sdl3_create_window(WindowType 
 
 	flags |= SDL_WINDOW_TRANSPARENT;
 
-	char* title_null_terminated = strndup(title, title_len);
+	char* title_null_terminated = strndup(title.data(), title.size());
 	if (title_null_terminated == nullptr)
 		return BAN::Error::from_errno(ENOMEM);
 
@@ -439,9 +439,9 @@ static void sdl3_set_cursor(PlatformWindow*, PlatformCursor* cursor)
 	}
 }
 
-static void sdl3_set_title(PlatformWindow* window, const char* title, size_t title_len)
+static void sdl3_set_title(PlatformWindow* window, BAN::StringView title)
 {
-	char* title_null_terminated = strndup(title, title_len);
+	char* title_null_terminated = strndup(title.data(), title.size());
 	if (title_null_terminated == nullptr)
 		return;
 

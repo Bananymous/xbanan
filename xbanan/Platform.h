@@ -2,6 +2,7 @@
 
 #include "Types.h"
 
+#include <BAN/StringView.h>
 #include <BAN/UniqPtr.h>
 
 struct PlatformWindow
@@ -51,7 +52,7 @@ struct PlatformOps
 	/* Handle pending events */
 	void (*poll_events)(void*);
 	/* Create a window with given size */
-	BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> (*create_window)(WindowType, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, const char* title, size_t title_len);
+	BAN::ErrorOr<BAN::UniqPtr<PlatformWindow>> (*create_window)(WindowType, WINDOW wid, int32_t x, int32_t y, uint32_t width, uint32_t height, BAN::StringView title);
 	/* All invalidate calls during one frame happen between calls to begin_frame and end_frame. pixels is in ARGB8888
 	 *   invalidate    should update the underlying textures
 	 *   begin_frame   should do any necessary preparations to update a frame
@@ -78,7 +79,7 @@ struct PlatformOps
 	/* Set custom cursor */
 	void (*set_cursor)(PlatformWindow*, PlatformCursor*);
 	/* Set window title */
-	void (*set_title)(PlatformWindow*, const char*, size_t);
+	void (*set_title)(PlatformWindow*, BAN::StringView);
 };
 extern PlatformOps g_platform_ops;
 

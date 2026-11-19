@@ -23,6 +23,9 @@
 18 PageUp
 19 PageDown
 20 ScrollLock
+21 VolumeMute
+22 VolumeDown
+23 VolumeUp
 
 45 Backspace
 
@@ -61,11 +64,13 @@
 140 RShift
 
 160 LControl
-161 Super
+161 LSuper
 162 LAlt
 163 Space
 164 RAlt
-165 RControl
+165 RSuper
+166 Application
+167 RControl
 
 # numpad (tl corner at (1, 23))
 56  NumLock

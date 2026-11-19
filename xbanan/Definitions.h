@@ -143,25 +143,12 @@ struct Client
 	};
 	int fd;
 	State state;
-	bool has_epollout { false };
 	bool has_bigrequests { false };
 	CARD16 sequence { 0 };
 	BAN::Optional<uint32_t> pid;
 	BAN::Vector<uint8_t> input_buffer;
 	BAN::Vector<uint8_t> output_buffer;
 	BAN::HashSet<CARD32> objects;
-};
-
-struct EpollThingy
-{
-	enum class Type
-	{
-		Client,
-		Event,
-	};
-
-	Type type;
-	BAN::Variant<Client, void*> value;
 };
 
 struct DisplayInfo
@@ -181,8 +168,7 @@ extern BAN::HashMap<BAN::String, ATOM> g_atoms_name_to_id;
 extern BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
 extern ATOM g_atom_value;
 
-extern int g_epoll_fd;
-extern BAN::HashMap<int, BAN::UniqPtr<EpollThingy>> g_epoll_thingies;
+extern BAN::HashMap<int, BAN::UniqPtr<Client>> g_clients;
 
 extern int g_server_grabber_fd;
 

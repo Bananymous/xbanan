@@ -40,6 +40,12 @@ For the simplest port, you need to implement 3 functions: `initialize`, `create_
 
 To handle events, you have to hook an event receiver fd for your platform using `register_event_fd` declared in `xbanan/Events.h` and define the `poll_events` function in `g_platform_ops`. When the registered fd becomes readable, xbanan will call your platform's `poll_events` function. This function should drain all of the pending events and call appropriate `on_*_event` function declared in the events header. If your platform does not expose fd(s) that can be polled for events, you can do what the SDL3 port does and create an eventfd/pipe that gets signaled periodically.
 
+### Optional Features
+
+By default xbanan uses epoll for its polling interface. If your platform does not support epoll, you can pass `-DUSE_EPOLL=OFF` to cmake to use poll instead.
+
+There are also two extensions that require additional features. These are GLX which needs opengl support and SHM which requires SysV shared memory (`shmat` and `shmdt`). These can be disabled with `-DENABLE_GLX=OFF` and `-DENABLE_SHM=OFF` respectively. The GLX extension does not use (or require) opengl and expects the client to render into memory which gets displayed through normal X11 `PutImage`/`ShmPutImage`. The stub extension is still needed as clients do query GLX support even when they don't actually do anything with it.
+
 ### Installation
 
 To install xbanan to sysroot, just copy the `build/xbanan/xbanan` to the destination. xbanan is statically linked against the libraries from this repository so you don't have to care about those. **DO NOT** use the cmake's install target, as that installs banan-os libraries to the root of the sysroot. You also need to have the x11 misc fonts at `FONT_PATH/misc` in your sysroot if you want server side font support. The fonts are shipped (public domain) with xbanan, so you can just copy `fonts/misc` into `FONT_PATH`. You can specify the `FONT_PATH` with cmake using `-DFONT_PATH=...` when configuring.

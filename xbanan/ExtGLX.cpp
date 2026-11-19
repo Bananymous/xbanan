@@ -95,7 +95,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.minorCode = minor_opcode,
 				.majorCode = major_opcode,
 			};
-			TRY(encode(client_info.output_buffer, error));
+			TRY(encode(client_info, error));
 			return BAN::Error::from_errno(ENOENT);
 		};
 
@@ -162,7 +162,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 0,
 				.isDirect = context.is_direct,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -181,7 +181,7 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.majorVersion = 1,
 				.minorVersion = 4,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -199,26 +199,26 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.numVisuals = 1,
 				.numProps = 18,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
-			TRY(encode<VISUALID>(client_info.output_buffer, g_visual.visualID));
-			TRY(encode<CARD32>(client_info.output_buffer, g_visual.c_class));
-			TRY(encode<BOOL32>(client_info.output_buffer, xTrue)); // rgba
-			TRY(encode<CARD32>(client_info.output_buffer, 8)); // red size
-			TRY(encode<CARD32>(client_info.output_buffer, 8)); // green size
-			TRY(encode<CARD32>(client_info.output_buffer, 8)); // blue size
-			TRY(encode<CARD32>(client_info.output_buffer, 8)); // alpha size
-			TRY(encode<CARD32>(client_info.output_buffer, 0)); // accum red size
-			TRY(encode<CARD32>(client_info.output_buffer, 0)); // accum green size
-			TRY(encode<CARD32>(client_info.output_buffer, 0)); // accum blue size
-			TRY(encode<CARD32>(client_info.output_buffer, 0)); // accum alpha size
-			TRY(encode<CARD32>(client_info.output_buffer, xTrue)); // double buffer
-			TRY(encode<BOOL32>(client_info.output_buffer, xFalse)); // stereo
-			TRY(encode<CARD32>(client_info.output_buffer, 32)); // buffer size
-			TRY(encode<CARD32>(client_info.output_buffer, 24)); // depth size
-			TRY(encode<CARD32>(client_info.output_buffer, 8)); // stencil size
-			TRY(encode<CARD32>(client_info.output_buffer, 0)); // aux buffers
-			TRY(encode<INT32>(client_info.output_buffer, 0)); // level
+			TRY(encode<VISUALID>(client_info, g_visual.visualID));
+			TRY(encode<CARD32>(client_info, g_visual.c_class));
+			TRY(encode<BOOL32>(client_info, xTrue)); // rgba
+			TRY(encode<CARD32>(client_info, 8)); // red size
+			TRY(encode<CARD32>(client_info, 8)); // green size
+			TRY(encode<CARD32>(client_info, 8)); // blue size
+			TRY(encode<CARD32>(client_info, 8)); // alpha size
+			TRY(encode<CARD32>(client_info, 0)); // accum red size
+			TRY(encode<CARD32>(client_info, 0)); // accum green size
+			TRY(encode<CARD32>(client_info, 0)); // accum blue size
+			TRY(encode<CARD32>(client_info, 0)); // accum alpha size
+			TRY(encode<CARD32>(client_info, xTrue)); // double buffer
+			TRY(encode<BOOL32>(client_info, xFalse)); // stereo
+			TRY(encode<CARD32>(client_info, 32)); // buffer size
+			TRY(encode<CARD32>(client_info, 24)); // depth size
+			TRY(encode<CARD32>(client_info, 8)); // stencil size
+			TRY(encode<CARD32>(client_info, 0)); // aux buffers
+			TRY(encode<INT32>(client_info, 0)); // level
 
 			break;
 		}
@@ -253,13 +253,13 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.length = static_cast<CARD32>((length + 3) / 4),
 				.n = static_cast<CARD16>(length),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
-			TRY(encode(client_info.output_buffer, string));
-			TRY(encode(client_info.output_buffer, '\0'));
+			TRY(encode(client_info, string));
+			TRY(encode(client_info, '\0'));
 
 			for (size_t i = 0; (length + i) % 4; i++)
-				TRY(encode(client_info.output_buffer, '\0'));
+				TRY(encode(client_info, '\0'));
 
 			break;
 		}
@@ -291,9 +291,9 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.numFBConfigs = fbconfigs,
 				.numAttribs = attribs,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
-			TRY(encode(client_info.output_buffer, g_fb_configs));
+			TRY(encode(client_info, g_fb_configs));
 
 			break;
 		}
@@ -348,25 +348,25 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 2 * 6,
 				.numAttribs = 6,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
-			TRY(encode<CARD32>(client_info.output_buffer, GLX_WIDTH));
-			TRY(encode<CARD32>(client_info.output_buffer, window.width));
+			TRY(encode<CARD32>(client_info, GLX_WIDTH));
+			TRY(encode<CARD32>(client_info, window.width));
 
-			TRY(encode<CARD32>(client_info.output_buffer, GLX_HEIGHT));
-			TRY(encode<CARD32>(client_info.output_buffer, window.height));
+			TRY(encode<CARD32>(client_info, GLX_HEIGHT));
+			TRY(encode<CARD32>(client_info, window.height));
 
-			TRY(encode<CARD32>(client_info.output_buffer, GLX_PRESERVED_CONTENTS));
-			TRY(encode<CARD32>(client_info.output_buffer, xTrue));
+			TRY(encode<CARD32>(client_info, GLX_PRESERVED_CONTENTS));
+			TRY(encode<CARD32>(client_info, xTrue));
 
-			TRY(encode<CARD32>(client_info.output_buffer, GLX_LARGEST_PBUFFER));
-			TRY(encode<CARD32>(client_info.output_buffer, window.width * window.height));
+			TRY(encode<CARD32>(client_info, GLX_LARGEST_PBUFFER));
+			TRY(encode<CARD32>(client_info, window.width * window.height));
 
-			TRY(encode<CARD32>(client_info.output_buffer, GLX_FBCONFIG_ID));
-			TRY(encode<CARD32>(client_info.output_buffer, 1));
+			TRY(encode<CARD32>(client_info, GLX_FBCONFIG_ID));
+			TRY(encode<CARD32>(client_info, 1));
 
-			TRY(encode<CARD32>(client_info.output_buffer, GLX_EVENT_MASK));
-			TRY(encode<CARD32>(client_info.output_buffer, 0));
+			TRY(encode<CARD32>(client_info, GLX_EVENT_MASK));
+			TRY(encode<CARD32>(client_info, 0));
 
 			break;
 		}

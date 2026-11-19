@@ -16,7 +16,7 @@ BAN::ErrorOr<void> extension_bigrequests(Client& client_info, BAN::ConstByteSpan
 				.length = 0,
 				.data00 = (16 << 20) / 4, // 16 MiB
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			client_info.has_bigrequests = true;
 

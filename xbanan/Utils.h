@@ -4,6 +4,8 @@
 #include <BAN/Optional.h>
 #include <BAN/Vector.h>
 
+class Client;
+
 template<typename T>
 inline BAN::Optional<T> decode(BAN::ConstByteSpan& buffer)
 {
@@ -14,22 +16,16 @@ inline BAN::Optional<T> decode(BAN::ConstByteSpan& buffer)
 	return result;
 }
 
-inline BAN::ErrorOr<void> encode_bytes(BAN::Vector<uint8_t>& buffer, const void* data, size_t size)
-{
-	const size_t old_size = buffer.size();
-	TRY(buffer.resize(old_size + size));
-	memcpy(buffer.data() + old_size, data, size);
-	return {};
-}
+BAN::ErrorOr<void> encode_bytes(Client& client, const void* data, size_t size);
 
 template<typename T> requires BAN::is_pod_v<T>
-inline BAN::ErrorOr<void> encode(BAN::Vector<uint8_t>& buffer, const T& value)
+inline BAN::ErrorOr<void> encode(Client& client, const T& value)
 {
-	return encode_bytes(buffer, &value, sizeof(T));
+	return encode_bytes(client, &value, sizeof(T));
 }
 
 template<typename T> requires requires(T value) { value.size(); value.data(); }
-inline BAN::ErrorOr<void> encode(BAN::Vector<uint8_t>& buffer, const T& value)
+inline BAN::ErrorOr<void> encode(Client& client, const T& value)
 {
-	return encode_bytes(buffer, value.data(), value.size() * sizeof(typename T::value_type));
+	return encode_bytes(client, value.data(), value.size() * sizeof(typename T::value_type));
 }

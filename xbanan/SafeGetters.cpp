@@ -16,7 +16,7 @@ BAN::ErrorOr<Object::Window&> get_window(Client& client_info, CARD32 wid, BYTE o
 			.minorCode = op_minor,
 			.majorCode = op_major,
 		};
-		TRY(encode(client_info.output_buffer, error));
+		TRY(encode(client_info, error));
 		return BAN::Error::from_errno(ENOENT);
 	}
 
@@ -36,7 +36,7 @@ BAN::ErrorOr<Object::Pixmap&> get_pixmap(Client& client_info, CARD32 pid, BYTE o
 			.minorCode = op_minor,
 			.majorCode = op_major,
 		};
-		TRY(encode(client_info.output_buffer, error));
+		TRY(encode(client_info, error));
 		return BAN::Error::from_errno(ENOENT);
 	}
 
@@ -56,7 +56,7 @@ BAN::ErrorOr<Object::GraphicsContext&> get_gc(Client& client_info, CARD32 gc, BY
 			.minorCode = op_minor,
 			.majorCode = op_major,
 		};
-		TRY(encode(client_info.output_buffer, error));
+		TRY(encode(client_info, error));
 		return BAN::Error::from_errno(ENOENT);
 	}
 
@@ -76,7 +76,7 @@ BAN::ErrorOr<DrawableInfo> get_drawable_info(Client& client_info, CARD32 drawabl
 			.minorCode = op_minor,
 			.majorCode = op_major,
 		};
-		TRY(encode(client_info.output_buffer, error));
+		TRY(encode(client_info, error));
 		return BAN::Error::from_errno(ENOENT);
 	}
 

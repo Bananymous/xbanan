@@ -7,17 +7,17 @@
 template<typename F>
 static BAN::ErrorOr<void> for_each_client(uint32_t target_spec, const F& callback)
 {
-	for (const auto& [fd, thingy] : g_epoll_thingies)
+	if (const int fd = target_spec >> 20)
 	{
-		if (thingy->type != EpollThingy::Type::Client)
-			continue;
-
-		const auto& client_info = thingy->value.get<Client>();
-		if (target_spec && (target_spec >> 20) != client_info.fd)
-			continue;
-
-		TRY(callback(client_info, target_spec ? target_spec : (client_info.fd << 20)));
+		if (auto it = g_clients.find(fd); it != g_clients.end())
+			TRY(callback(*it->value, fd << 20));
 	}
+	else
+	{
+		for (const auto& [fd, client] : g_clients)
+			TRY(callback(*client, fd << 20));
+	}
+
 	return {};
 }
 
@@ -43,7 +43,7 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 				.server_major = 1,
 				.server_minor = 2,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -56,6 +56,14 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 
 			uint32_t num_ids { 0 };
 			BAN::Vector<uint8_t> query_result;
+
+			const auto result_append = [&query_result]<typename T>(const T& value) -> BAN::ErrorOr<void> {
+				static_assert(BAN::is_pod_v<T>);
+				const size_t old_size = query_result.size();
+				TRY(query_result.resize(old_size + sizeof(T)));
+				memcpy(query_result.data() + old_size, &value, sizeof(T));
+				return {};
+			};
 
 			for (size_t i = 0; i < request.numSpecs; i++)
 			{
@@ -71,7 +79,7 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 							},
 							.length = 0,
 						};
-						TRY(encode(query_result, value));
+						TRY(result_append(value));
 						num_ids++;
 					}
 					if ((spec.mask == None || (spec.mask & X_XResLocalClientPIDMask)) && client_info.pid.has_value())
@@ -83,8 +91,8 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 							},
 							.length = 4,
 						};
-						TRY(encode(query_result, value));
-						TRY(encode(query_result, client_info.pid.value()));
+						TRY(result_append(value));
+						TRY(result_append(client_info.pid.value()));
 						num_ids++;
 					}
 					return {};
@@ -97,8 +105,8 @@ BAN::ErrorOr<void> extension_xres(Client& client_info, BAN::ConstByteSpan packet
 				.length = static_cast<uint32_t>(query_result.size() / 4),
 				.numIds = num_ids,
 			};
-			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, query_result));
+			TRY(encode(client_info, reply));
+			TRY(encode(client_info, query_result));
 
 			break;
 		}

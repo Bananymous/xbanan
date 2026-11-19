@@ -1,29 +1,25 @@
 #include "Base.h"
 #include "Definitions.h"
 #include "Keymap.h"
+#include "Poller.h"
 #include "Utils.h"
 
 #include <X11/X.h>
 #include <X11/Xatom.h>
 
 #include <time.h>
-#include <sys/epoll.h>
 
 void register_event_fd(int fd, void* data)
 {
-	epoll_event event { .events = EPOLLIN, .data = { .fd = fd } };
-	epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, fd, &event);
-
-	MUST(g_epoll_thingies.insert(fd, MUST(BAN::UniqPtr<EpollThingy>::create(EpollThingy {
-		.type = EpollThingy::Type::Event,
-		.value = data,
-	}))));
+	poller_add(fd, POLLMODE_IN, {
+		.type = Pollable::Type::Event,
+		.data = data
+	});
 }
 
 void unregister_event_fd(int fd)
 {
-	epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
-	g_epoll_thingies.remove(fd);
+	poller_remove(fd);
 }
 
 void on_window_close_event(WINDOW wid)
@@ -71,7 +67,7 @@ void on_window_close_event(WINDOW wid)
 		event.u.u.type = ClientMessage;
 		event.u.u.detail = 32;
 		event.u.u.sequenceNumber = window.owner.sequence;
-		MUST(encode(window.owner.output_buffer, event));
+		MUST(encode(window.owner, event));
 	}
 }
 
@@ -551,9 +547,9 @@ void on_keymap_changed()
 		event.u.mappingNotify.request = MappingKeyboard,
 		event.u.mappingNotify.firstKeyCode = g_keymap_min_keycode,
 		event.u.mappingNotify.count = g_keymap_size,
-		MUST(encode(client_info.output_buffer, event));
+		MUST(encode(client_info, event));
 
 		event.u.mappingNotify.request = MappingModifier;
-		MUST(encode(client_info.output_buffer, event));
+		MUST(encode(client_info, event));
 	}
 }

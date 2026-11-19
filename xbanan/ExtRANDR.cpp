@@ -87,7 +87,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.majorVersion = 1,
 				.minorVersion = 6,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -122,7 +122,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.rate = 60,
 				.nrateEnts = 1,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			xScreenSizes screen_size {
 				.widthInPixels = g_root.pixWidth,
@@ -130,10 +130,10 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.widthInMillimeters = g_root.mmWidth,
 				.heightInMillimeters = g_root.mmHeight,
 			};
-			TRY(encode(client_info.output_buffer, screen_size));
+			TRY(encode(client_info, screen_size));
 
-			TRY(encode<CARD16>(client_info.output_buffer, 60));
-			TRY(encode<CARD16>(client_info.output_buffer, 0));
+			TRY(encode<CARD16>(client_info, 60));
+			TRY(encode<CARD16>(client_info, 0));
 
 			break;
 		}
@@ -153,7 +153,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.maxWidth = g_root.pixWidth,
 				.maxHeight = g_root.pixHeight,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -182,13 +182,13 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.nModes = static_cast<CARD16>(s_randr_displays.size()),
 				.nbytesNames = static_cast<CARD16>(mode_name_bytes),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			for (const auto& display : s_randr_displays)
-				TRY(encode(client_info.output_buffer, display.crtc_id));
+				TRY(encode(client_info, display.crtc_id));
 
 			for (const auto& display : s_randr_displays)
-				TRY(encode(client_info.output_buffer, display.output_id));
+				TRY(encode(client_info, display.output_id));
 
 			for (const auto& display : s_randr_displays)
 			{
@@ -217,13 +217,13 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 					.nameLength = static_cast<CARD16>(display.mode_str.size()),
 					.modeFlags = RR_HSyncPositive | RR_VSyncPositive,
 				};
-				TRY(encode(client_info.output_buffer, mode_info));
+				TRY(encode(client_info, mode_info));
 			}
 
 			for (const auto& display : s_randr_displays)
-				TRY(encode(client_info.output_buffer, display.mode_str));
+				TRY(encode(client_info, display.mode_str));
 			while (client_info.output_buffer.size() % 4)
-				TRY(encode<BYTE>(client_info.output_buffer, 0));
+				TRY(encode<BYTE>(client_info, 0));
 
 			break;
 		}
@@ -254,12 +254,12 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.nClones = 0,
 				.nameLength = static_cast<CARD16>(display.output_str.size()),
 			};
-			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, display.crtc_id));
-			TRY(encode(client_info.output_buffer, display.mode_id));
-			TRY(encode(client_info.output_buffer, display.output_str));
+			TRY(encode(client_info, reply));
+			TRY(encode(client_info, display.crtc_id));
+			TRY(encode(client_info, display.mode_id));
+			TRY(encode(client_info, display.output_str));
 			while (client_info.output_buffer.size() % 4)
-				TRY(encode<BYTE>(client_info.output_buffer, 0));
+				TRY(encode<BYTE>(client_info, 0));
 
 			break;
 		}
@@ -276,7 +276,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.length = 0,
 				.nAtoms = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -302,7 +302,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.bytesAfter = 0,
 				.nItems = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -332,9 +332,9 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.nOutput = 1,
 				.nPossibleOutput = 1,
 			};
-			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, display.output_id));
-			TRY(encode(client_info.output_buffer, display.output_id));
+			TRY(encode(client_info, reply));
+			TRY(encode(client_info, display.output_id));
+			TRY(encode(client_info, display.output_id));
 
 			break;
 		}
@@ -359,7 +359,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.length = 0,
 				.newTimestamp = s_timestamp,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -377,7 +377,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.length = 0,
 				.size = 256,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -395,10 +395,10 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.length = (6 * 256) / 4,
 				.size = 256,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 			for (size_t i = 0; i < 3; i++)
 				for (size_t j = 0; j < 256; j++)
-					TRY(encode<CARD16>(client_info.output_buffer, j * 65535 / 255));
+					TRY(encode<CARD16>(client_info, j * 65535 / 255));
 
 			break;
 		}
@@ -422,7 +422,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.currentNbytesFilter = 0,
 				.currentNparamsFilter = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -452,7 +452,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.border_right = 0,
 				.border_bottom = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -469,7 +469,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.length = 0,
 				.output = s_randr_displays.front().output_id,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -487,7 +487,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.timestamp = s_timestamp,
 				.nProviders = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -508,7 +508,7 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 				.nmonitors = static_cast<CARD32>(s_randr_displays.size()),
 				.noutputs = static_cast<CARD32>(s_randr_displays.size()),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			for (const auto& display : s_randr_displays)
 			{
@@ -524,8 +524,8 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 					.widthInMillimeters  = display.info.w * 254 / 96, // 96 DPI
 					.heightInMillimeters = display.info.h * 254 / 96, // 96 DPI
 				};
-				TRY(encode(client_info.output_buffer, monitor));
-				TRY(encode(client_info.output_buffer, display.output_id));
+				TRY(encode(client_info, monitor));
+				TRY(encode(client_info, display.output_id));
 			}
 
 			break;

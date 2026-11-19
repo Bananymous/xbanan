@@ -32,7 +32,7 @@ static BAN::ErrorOr<void*> get_shmseg(Client& client_info, CARD32 shmseg, BYTE o
 		.minorCode = op_minor,
 		.majorCode = op_major,
 	};
-	TRY(encode(client_info.output_buffer, error));
+	TRY(encode(client_info, error));
 	return BAN::Error::from_errno(ENOENT);
 }
 
@@ -58,7 +58,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.gid = static_cast<CARD16>(getgid()),
 				.pixmapFormat = ZPixmap,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -82,7 +82,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 					.minorCode = op_minor,
 					.majorCode = op_major,
 				};
-				TRY(encode(client_info.output_buffer, error));
+				TRY(encode(client_info, error));
 				return {};
 			}
 
@@ -107,7 +107,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.shmseg = request.shmseg,
 				.offset = 0,
 			};
-			TRY(encode(client_info.output_buffer, event));
+			TRY(encode(client_info, event));
 
 			break;
 		}
@@ -185,7 +185,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 					.shmseg = request.shmseg,
 					.offset = request.offset,
 				};
-				TRY(encode(client_info.output_buffer, event));
+				TRY(encode(client_info, event));
 			}
 
 			break;
@@ -232,7 +232,7 @@ static BAN::ErrorOr<void> extension_shm(Client& client_info, BAN::ConstByteSpan 
 				.visual = g_visual.visualID,
 				.size = dwords * 4,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}

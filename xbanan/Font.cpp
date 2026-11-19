@@ -517,7 +517,7 @@ static BAN::ErrorOr<BAN::RefPtr<PCFFont>> get_fontable(Client& client_info, CARD
 			.minorCode = 0,
 			.majorCode = opcode,
 		};
-		TRY(encode(client_info.output_buffer, error));
+		TRY(encode(client_info, error));
 		return BAN::Error::from_errno(ENOENT);
 	}
 
@@ -572,7 +572,7 @@ BAN::ErrorOr<void> open_font(Client& client_info, BAN::ConstByteSpan packet)
 		.minorCode = 0,
 		.majorCode = X_OpenFont,
 	};
-	TRY(encode(client_info.output_buffer, error));
+	TRY(encode(client_info, error));
 	return {};
 }
 
@@ -617,10 +617,10 @@ BAN::ErrorOr<void> query_font(Client& client_info, BAN::ConstByteSpan packet)
 		.fontDescent = font->font_descent,
 		.nCharInfos = static_cast<CARD32>(font->glyphs.size()),
 	};
-	TRY(encode(client_info.output_buffer, reply));
+	TRY(encode(client_info, reply));
 
 	for (const auto& glyph : font->glyphs)
-		TRY(encode(client_info.output_buffer, glyph.char_info));
+		TRY(encode(client_info, glyph.char_info));
 
 	return {};
 }
@@ -643,8 +643,12 @@ BAN::ErrorOr<void> list_fonts(Client& client_info, BAN::ConstByteSpan packet)
 			break;
 		if (!matches_pattern(pattern, name))
 			continue;
-		TRY(encode<BYTE>(result, name.size()));
-		TRY(encode(result, name));
+
+		const size_t old_size = result.size();
+		TRY(result.resize(old_size + 1 + name.size()));
+		result[old_size] = name.size();
+		memcpy(result.data() + old_size + 1, name.data(), name.size());
+
 		nfonts++;
 	}
 
@@ -654,11 +658,11 @@ BAN::ErrorOr<void> list_fonts(Client& client_info, BAN::ConstByteSpan packet)
 		.length = static_cast<CARD32>((result.size() + 3) / 4),
 		.nFonts = nfonts,
 	};
-	TRY(encode(client_info.output_buffer, reply));
+	TRY(encode(client_info, reply));
 
-	TRY(encode(client_info.output_buffer, result));
+	TRY(encode(client_info, result));
 	for (size_t i = 0; (result.size() + i) % 4; i++)
-		TRY(encode(client_info.output_buffer, '\0'));
+		TRY(encode(client_info, '\0'));
 
 	return {};
 }
@@ -712,11 +716,11 @@ BAN::ErrorOr<void> list_fonts_with_info(Client& client_info, BAN::ConstByteSpan 
 			.fontDescent = font->font_descent,
 			.nReplies = 1,
 		};
-		TRY(encode(client_info.output_buffer, reply));
+		TRY(encode(client_info, reply));
 
-		TRY(encode(client_info.output_buffer, name));
+		TRY(encode(client_info, name));
 		for (size_t i = 0; (name.size() + i) % 4; i++)
-			TRY(encode(client_info.output_buffer, '\0'));
+			TRY(encode(client_info, '\0'));
 
 		nfonts++;
 	}
@@ -727,7 +731,7 @@ BAN::ErrorOr<void> list_fonts_with_info(Client& client_info, BAN::ConstByteSpan 
 		.sequenceNumber = client_info.sequence,
 		.length = 7,
 	};
-	TRY(encode(client_info.output_buffer, reply));
+	TRY(encode(client_info, reply));
 
 	return {};
 }
@@ -994,7 +998,7 @@ BAN::ErrorOr<void> create_glyph_cursor(Client& client_info, BAN::ConstByteSpan p
 			.minorCode = 0,
 			.majorCode = X_CreateGlyphCursor,
 		};
-		TRY(encode(client_info.output_buffer, error));
+		TRY(encode(client_info, error));
 		return {};
 	}
 
@@ -1028,7 +1032,7 @@ BAN::ErrorOr<void> create_glyph_cursor(Client& client_info, BAN::ConstByteSpan p
 				.minorCode = 0,
 				.majorCode = X_CreateGlyphCursor,
 			};
-			TRY(encode(client_info.output_buffer, error));
+			TRY(encode(client_info, error));
 			return {};
 		}
 

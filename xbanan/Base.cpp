@@ -5,6 +5,7 @@
 #include "Font.h"
 #include "Image.h"
 #include "Keymap.h"
+#include "Poller.h"
 #include "SafeGetters.h"
 #include "Utils.h"
 
@@ -12,7 +13,6 @@
 #include <X11/Xatom.h>
 
 #include <time.h>
-#include <sys/epoll.h>
 
 struct Selection
 {
@@ -184,7 +184,7 @@ BAN::ErrorOr<void> Object::Window::send_event(xEvent xevent, uint32_t xmask)
 		if (!(event_mask & xmask))
 			continue;
 		xevent.u.u.sequenceNumber = client->sequence;
-		TRY(encode(client->output_buffer, xevent));
+		TRY(encode(*client, xevent));
 	}
 
 	return {};
@@ -214,7 +214,7 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 		.minorVersion = 0,
 		.length = 8 + 2 * format_count + (8 + 0 + sz_xWindowRoot + sz_xDepth + sz_xVisualType) / 4,
 	};
-	TRY(encode(client_info.output_buffer, setup_prefix));
+	TRY(encode(client_info, setup_prefix));
 
 	ASSERT((client_info.fd >> 20) == 0);
 
@@ -235,12 +235,12 @@ BAN::ErrorOr<void> setup_client_conneciton(Client& client_info, const xConnClien
 		.maxKeyCode = g_keymap_max_keycode,
 	};
 
-	TRY(encode(client_info.output_buffer, setup));
-	TRY(encode(client_info.output_buffer, "_xbanan_"_sv));
-	TRY(encode(client_info.output_buffer, BAN::ConstByteSpan::from(g_formats)));
-	TRY(encode(client_info.output_buffer, g_root));
-	TRY(encode(client_info.output_buffer, g_depth));
-	TRY(encode(client_info.output_buffer, g_visual));
+	TRY(encode(client_info, setup));
+	TRY(encode(client_info, "_xbanan_"_sv));
+	TRY(encode(client_info, BAN::ConstByteSpan::from(g_formats)));
+	TRY(encode(client_info, g_root));
+	TRY(encode(client_info, g_depth));
+	TRY(encode(client_info, g_visual));
 
 	client_info.state = Client::State::Connected;
 
@@ -878,7 +878,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.minorCode = 0,
 				.majorCode = opcode,
 			};
-			TRY(encode(client_info.output_buffer, error));
+			TRY(encode(client_info, error));
 			return BAN::Error::from_errno(ENOENT);
 		};
 
@@ -950,7 +950,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.minorCode = 0,
 					.majorCode = opcode,
 				};
-				TRY(encode(client_info.output_buffer, error));
+				TRY(encode(client_info, error));
 				return {};
 			}
 
@@ -1126,7 +1126,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.yourEventMask = my_event_mask,
 				.doNotPropagateMask = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -1373,7 +1373,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.minorCode = 0,
 					.majorCode = opcode,
 				};
-				TRY(encode(client_info.output_buffer, error));
+				TRY(encode(client_info, error));
 				return {};
 			}
 
@@ -1418,7 +1418,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.height = height,
 				.borderWidth = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -1439,9 +1439,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.parent = window.parent,
 				.nChildren = static_cast<CARD16>(window.children.size()),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 			for (auto child_wid : window.children)
-				TRY(encode<CARD32>(client_info.output_buffer, child_wid));
+				TRY(encode<CARD32>(client_info, child_wid));
 
 			break;
 		}
@@ -1465,7 +1465,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 0,
 				.atom = it != g_atoms_name_to_id.end() ? it->value : 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -1486,7 +1486,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.minorCode = 0,
 					.majorCode = X_GetAtomName,
 				};
-				TRY(encode(client_info.output_buffer, error));
+				TRY(encode(client_info, error));
 			}
 			else
 			{
@@ -1497,10 +1497,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.length = static_cast<CARD32>((name.size() + 3) / 4),
 					.nameLength = static_cast<CARD16>(name.size()),
 				};
-				TRY(encode(client_info.output_buffer, reply));
-				TRY(encode(client_info.output_buffer, name));
+				TRY(encode(client_info, reply));
+				TRY(encode(client_info, name));
 				for (size_t i = 0; (name.size() + i) % 4; i++)
-					TRY(encode<BYTE>(client_info.output_buffer, 0));
+					TRY(encode<BYTE>(client_info, 0));
 			}
 
 			break;
@@ -1630,7 +1630,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.bytesAfter = 0,
 					.nItems = 0,
 				};
-				TRY(encode(client_info.output_buffer, reply));
+				TRY(encode(client_info, reply));
 			}
 			else if (request.type != AnyPropertyType && request.type != it->value.type)
 			{
@@ -1645,7 +1645,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.bytesAfter = static_cast<CARD32>(property.data.size()),
 					.nItems = 0,
 				};
-				TRY(encode(client_info.output_buffer, reply));
+				TRY(encode(client_info, reply));
 			}
 			else
 			{
@@ -1664,10 +1664,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.bytesAfter = static_cast<CARD32>(property.data.size() - offset - bytes),
 					.nItems = static_cast<CARD32>(bytes / (property.format / 8)),
 				};
-				TRY(encode(client_info.output_buffer, reply));
-				TRY(encode(client_info.output_buffer, property.data.span().slice(offset, bytes)));
+				TRY(encode(client_info, reply));
+				TRY(encode(client_info, property.data.span().slice(offset, bytes)));
 				for (size_t i = 0; (bytes + i) % 4; i++)
-					TRY(encode<BYTE>(client_info.output_buffer, 0));
+					TRY(encode<BYTE>(client_info, 0));
 
 				if (reply.bytesAfter == 0 && request.c_delete)
 				{
@@ -1703,10 +1703,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = static_cast<CARD32>(window.properties.size()),
 				.nProperties = static_cast<CARD16>(window.properties.size()),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			for (const auto& [atom, _] : window.properties)
-				TRY(encode(client_info.output_buffer, atom));
+				TRY(encode(client_info, atom));
 
 			break;
 		}
@@ -1736,7 +1736,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}};
 				xevent.u.u.type = SelectionClear;
 				xevent.u.u.sequenceNumber = client_info.sequence;
-				TRY(encode(client_info.output_buffer, xevent));
+				TRY(encode(client_info, xevent));
 			}
 
 			TRY(g_selections.insert_or_assign(request.selection, {
@@ -1764,7 +1764,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 0,
 				.owner = owner,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -1793,7 +1793,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}};
 				xevent.u.u.type = SelectionNotify;
 				xevent.u.u.sequenceNumber = client_info.sequence;
-				TRY(encode(client_info.output_buffer, xevent));
+				TRY(encode(client_info, xevent));
 			}
 			else
 			{
@@ -1809,7 +1809,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}};
 				xevent.u.u.type = SelectionRequest;
 				xevent.u.u.sequenceNumber = client_info.sequence;
-				TRY(encode(client_info.output_buffer, xevent));
+				TRY(encode(client_info, xevent));
 			}
 
 			break;
@@ -1827,30 +1827,20 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			if (wid == PointerWindow || wid == InputFocus)
 				wid = g_focus_window;
 
-			(void)TRY_REF(get_window(client_info, wid, X_SendEvent));
-
-			Client* target_client = nullptr;
-			for (auto& [_, thingy] : g_epoll_thingies)
-			{
-				if (thingy->type != EpollThingy::Type::Client)
-					continue;
-				auto& other_client = thingy->value.get<Client>();
-				if (!other_client.objects.contains(wid))
-					continue;
-				target_client = &other_client;
-				break;
-			}
+			const auto& window = TRY_REF(get_window(client_info, wid, X_SendEvent));
 
 			// FIXME: propagate, event masks
 
-			if (target_client)
+			if (request.destination == g_root.windowId)
 			{
-				request.event.u.u.sequenceNumber = target_client->sequence;
-				TRY(encode(target_client->output_buffer, request.event));
+				if (request.event.u.u.type == ClientMessage)
+					on_root_client_message(request.event);
 			}
-
-			if (request.destination == g_root.windowId && request.event.u.u.type == ClientMessage)
-				on_root_client_message(request.event);
+			else
+			{
+				request.event.u.u.sequenceNumber = window.owner.sequence;
+				TRY(encode(window.owner, request.event));
+			}
 
 			break;
 		}
@@ -1881,7 +1871,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.sequenceNumber = client_info.sequence,
 					.length = 0,
 				};
-				TRY(encode(client_info.output_buffer, reply));
+				TRY(encode(client_info, reply));
 
 				if (g_platform_ops.set_pointer_grab)
 					if (auto* platform_window = get_platform_window(window))
@@ -1897,7 +1887,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.sequenceNumber = client_info.sequence,
 					.length = 0,
 				};
-				TRY(encode(client_info.output_buffer, reply));
+				TRY(encode(client_info, reply));
 			}
 
 			break;
@@ -1938,7 +1928,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -1955,22 +1945,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			g_server_grabber_fd = client_info.fd;
 
-			for (const auto& [_, thingy] : g_epoll_thingies)
-			{
-				if (thingy->type != EpollThingy::Type::Client)
-					continue;
-
-				auto& other_client = thingy->value.get<Client>();
-				if (client_info.fd == other_client.fd)
-					continue;
-
-				uint32_t events = 0;
-				if (other_client.has_epollout)
-					events |= EPOLLOUT;
-
-				epoll_event event { .events = events, .data = { .fd = other_client.fd } };
-				epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
-			}
+			for (const auto& [_, other] : g_clients)
+				if (other.ptr() != &client_info)
+					poller_modify(other->fd, 0, POLLMODE_IN);
 
 			break;
 		}
@@ -1978,22 +1955,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 		{
 			g_server_grabber_fd = -1;
 
-			for (const auto& [_, thingy] : g_epoll_thingies)
-			{
-				if (thingy->type != EpollThingy::Type::Client)
-					continue;
-
-				auto& other_client = thingy->value.get<Client>();
-				if (client_info.fd == other_client.fd)
-					continue;
-
-				uint32_t events = EPOLLIN;
-				if (other_client.has_epollout)
-					events |= EPOLLOUT;
-
-				epoll_event event { .events = events, .data = { .fd = other_client.fd } };
-				epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
-			}
+			for (const auto& [_, other] : g_clients)
+				if (other.ptr() != &client_info)
+					poller_modify(other->fd, POLLMODE_IN, 0);
 
 			break;
 		}
@@ -2040,7 +2004,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.winY = static_cast<INT16>(root_cursor_y - root_y),
 				.mask = static_cast<KeyButMask>(g_keymask | g_butmask),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2069,7 +2033,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.dstX = static_cast<INT16>(src_x + request.srcX - dst_x),
 				.dstY = static_cast<INT16>(src_y + request.srcY - dst_y),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2113,7 +2077,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 2,
 			};
 			memcpy(reply.map, g_pressed_keys, 32);
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2143,7 +2107,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = 0,
 				.focus = g_focus_window,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2490,7 +2454,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				}};
 				event.u.u.type = NoExpose;
 				event.u.u.sequenceNumber = client_info.sequence;
-				TRY(encode(client_info.output_buffer, event));
+				TRY(encode(client_info, event));
 			}
 
 			if (g_objects[request.dstDrawable]->type == Object::Type::Window)
@@ -2595,7 +2559,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = dwords,
 				.visual = g_visual.visualID,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			const auto old_size = client_info.output_buffer.size();
 			TRY(client_info.output_buffer.resize(old_size + dwords * 4));
@@ -2660,7 +2624,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.green = request.green,
 				.blue = request.blue,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2678,7 +2642,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2697,7 +2661,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.length = static_cast<CARD32>(2 * count),
 				.nColors = static_cast<CARD16>(count),
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			dprintln("  colors:");
 			for (size_t i = 0; i < count; i++)
@@ -2709,10 +2673,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				const uint8_t g = (color >>  8) & 0xFF;
 				const uint8_t b = (color >>  0) & 0xFF;
 
-				TRY(encode<uint16_t>(client_info.output_buffer, (r << 8) | r));
-				TRY(encode<uint16_t>(client_info.output_buffer, (g << 8) | g));
-				TRY(encode<uint16_t>(client_info.output_buffer, (b << 8) | b));
-				TRY(encode<uint16_t>(client_info.output_buffer, 0));
+				TRY(encode<uint16_t>(client_info, (r << 8) | r));
+				TRY(encode<uint16_t>(client_info, (g << 8) | g));
+				TRY(encode<uint16_t>(client_info, (b << 8) | b));
+				TRY(encode<uint16_t>(client_info, 0));
 			}
 
 			break;
@@ -2738,7 +2702,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.screenGreen = 0,
 				.screenBlue = 0,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2843,7 +2807,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.width = request.width,
 				.height = request.height,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2875,7 +2839,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				break;
 			}
 
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2899,18 +2863,18 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = (extension_length + 3) / 4,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			for (const auto& extension : g_extensions)
 			{
 				if (extension.handler == nullptr)
 					continue;
-				TRY(encode<BYTE>(client_info.output_buffer, extension.name.size()));
-				TRY(encode(client_info.output_buffer, extension.name));
+				TRY(encode<BYTE>(client_info, extension.name.size()));
+				TRY(encode(client_info, extension.name));
 			}
 
 			for (size_t i = 0; (extension_length + i) % 4; i++)
-				TRY(encode(client_info.output_buffer, '\0'));
+				TRY(encode(client_info, '\0'));
 
 			break;
 		}
@@ -2932,7 +2896,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 					.minorCode = 0,
 					.majorCode = opcode,
 				};
-				TRY(encode(client_info.output_buffer, error));
+				TRY(encode(client_info, error));
 				break;
 			}
 
@@ -2942,8 +2906,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = static_cast<CARD32>(request.count * g_keymap_layers),
 			};
-			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, BAN::Span(
+			TRY(encode(client_info, reply));
+			TRY(encode(client_info, BAN::Span(
 				g_keymap + request.firstKeyCode - g_keymap_min_keycode,
 				request.count
 			)));
@@ -2960,7 +2924,7 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 5,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			break;
 		}
@@ -2974,10 +2938,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 2,
 			};
-			TRY(encode(client_info.output_buffer, reply));
+			TRY(encode(client_info, reply));
 
 			for (size_t i = 1; i <= 8; i++)
-				TRY(encode<CARD8>(client_info.output_buffer, i));
+				TRY(encode<CARD8>(client_info, i));
 
 			break;
 		}
@@ -2991,8 +2955,8 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 				.sequenceNumber = client_info.sequence,
 				.length = 2 * g_modifier_layers,
 			};
-			TRY(encode(client_info.output_buffer, reply));
-			TRY(encode(client_info.output_buffer, g_modifier_map));
+			TRY(encode(client_info, reply));
+			TRY(encode(client_info, g_modifier_map));
 
 			break;
 		}

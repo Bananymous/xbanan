@@ -11,6 +11,7 @@ set(XBANAN_SOURCES
 	Image.cpp
 	Keymap.cpp
 	SafeGetters.cpp
+	Utils.cpp
 )
 
 set(XBANAN_LIBS
@@ -19,6 +20,13 @@ set(XBANAN_LIBS
 )
 
 set(FONT_PATH ${CMAKE_SOURCE_DIR}/fonts CACHE STRING "path to X11 fonts")
+
+option(USE_EPOLL "use epoll as the poller" ON)
+if(USE_EPOLL)
+	list(APPEND XBANAN_SOURCES PollerEpoll.cpp)
+else()
+	list(APPEND XBANAN_SOURCES PollerPoll.cpp)
+endif()
 
 option(ENABLE_GLX "enable glx extension" ON)
 if(ENABLE_GLX)
@@ -43,8 +51,8 @@ add_executable(xbanan ${XBANAN_SOURCES})
 
 target_compile_definitions(xbanan PRIVATE FONT_PATH="${FONT_PATH}")
 
-target_compile_options(xbanan PRIVATE -Wall -Wextra)
 target_compile_options(xbanan PRIVATE
+	-Wall -Wextra
 	-Wno-sign-compare
 	-Wno-missing-field-initializers
 	-Wno-unused-variable

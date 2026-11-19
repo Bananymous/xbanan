@@ -1,12 +1,12 @@
 #include "Base.h"
 #include "Definitions.h"
+#include "Poller.h"
 
 #include <X11/X.h>
 #include <X11/Xatom.h>
 
 #include <locale.h>
 #include <signal.h>
-#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -96,8 +96,7 @@ BAN::HashMap<BAN::String, ATOM> g_atoms_name_to_id;
 BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
 ATOM g_atom_value = XA_LAST_PREDEFINED + 1;
 
-int g_epoll_fd;
-BAN::HashMap<int, BAN::UniqPtr<EpollThingy>> g_epoll_thingies;
+BAN::HashMap<int, BAN::UniqPtr<Client>> g_clients;
 
 int g_server_grabber_fd = -1;
 
@@ -159,21 +158,11 @@ int main()
 		return 1;
 	}
 
-	g_epoll_fd = epoll_create1(0);
-	if (g_epoll_fd == -1)
-	{
-		perror("xbanan: epoll_create1");
-		return 1;
-	}
-
-	{
-		epoll_event event { .events = EPOLLIN, .data = { .ptr = nullptr } };
-		if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, server_sock, &event) == -1)
-		{
-			perror("xbanan: epoll_ctl");
-			return 1;
-		}
-	}
+	poller_initialize();
+	poller_add(server_sock, POLLMODE_IN, {
+		.type = Pollable::Type::Server,
+		.data = nullptr
+	});
 
 #define APPEND_ATOM(name) do { \
 			MUST(g_atoms_id_to_name.insert(name, #name##_sv.substring(3))); \
@@ -319,9 +308,7 @@ int main()
 	const auto close_client =
 		[](int client_fd)
 		{
-			auto& epoll_thingy = g_epoll_thingies[client_fd];
-			ASSERT(epoll_thingy->type == EpollThingy::Type::Client);
-			auto& client_info = epoll_thingy->value.get<Client>();
+			auto& client_info = *g_clients[client_fd];
 
 			dprintln("client {} disconnected", client_fd);
 
@@ -373,256 +360,216 @@ int main()
 				g_objects.remove(it);
 			}
 
-			epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
-			g_epoll_thingies.remove(client_fd);
+			poller_remove(client_fd);
+			g_clients.remove(client_fd);
 			close(client_fd);
 
 			if (client_fd == g_server_grabber_fd)
 			{
 				g_server_grabber_fd = -1;
-
-				for (const auto& [_, thingy] : g_epoll_thingies)
-				{
-					if (thingy->type != EpollThingy::Type::Client)
-						continue;
-
-					auto& other_client = thingy->value.get<Client>();
-
-					uint32_t events = EPOLLIN;
-					if (other_client.has_epollout)
-						events |= EPOLLOUT;
-
-					epoll_event event { .events = events, .data = { .fd = other_client.fd } };
-					epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, other_client.fd, &event);
-				}
+				for (const auto& [other_fd, _] : g_clients)
+					poller_modify(other_fd, POLLMODE_IN, 0);
 			}
 		};
 
 	for (;;)
 	{
-		epoll_event events[16];
-		const int event_count = epoll_wait(g_epoll_fd, events, 16, -1);
+		PollEvent events[16];
+		const size_t event_count = poller_wait(events, sizeof(events) / sizeof(*events));
 
-		for (int i = 0; i < event_count; i++)
+		for (const auto& event : BAN::Span(events, event_count))
 		{
-			if (events[i].data.ptr == nullptr)
+			switch (event.pollable.type)
 			{
-				int client_sock = accept(server_sock, nullptr, nullptr);
-				if (client_sock == -1)
+				case Pollable::Type::Event:
+					g_platform_ops.poll_events(event.pollable.data);
+					break;
+				case Pollable::Type::Server:
 				{
-					perror("xbanan: accept");
-					continue;
-				}
+					const int client_sock = accept(event.fd, nullptr, nullptr);
+					if (client_sock == -1)
+					{
+						perror("xbanan: accept");
+						break;
+					}
 
-				BAN::Optional<uint32_t> client_pid;
+					BAN::Optional<uint32_t> client_pid;
 
-#ifdef SO_PEERCRED
-				ucred client_cred;
-				socklen_t client_cred_len = sizeof(client_cred);
-				if (getsockopt(client_sock, SOL_SOCKET, SO_PEERCRED, &client_cred, &client_cred_len) == 0)
-					client_pid = client_cred.pid;
-#endif
+	#ifdef SO_PEERCRED
+					ucred client_cred;
+					socklen_t client_cred_len = sizeof(client_cred);
+					if (getsockopt(client_sock, SOL_SOCKET, SO_PEERCRED, &client_cred, &client_cred_len) == 0)
+						client_pid = client_cred.pid;
+	#endif
 
-				MUST(g_epoll_thingies.insert(client_sock, MUST(BAN::UniqPtr<EpollThingy>::create(EpollThingy {
-					.type = EpollThingy::Type::Client,
-					.value = Client {
-						.fd = client_sock,
+					auto client = MUST(BAN::UniqPtr<Client>::create(Client {
+						.fd    = client_sock,
 						.state = Client::State::ConnectionSetup,
-						.pid = client_pid,
-					}
-				}))));
+						.pid   = client_pid,
+					}));
 
-				uint32_t events = 0;
-				if (g_server_grabber_fd == -1)
-					events |= EPOLLIN;
+					uint32_t event_mask = 0;
+					if (g_server_grabber_fd == -1)
+						event_mask |= POLLMODE_IN;
 
-				epoll_event event = { .events = events, .data = { .fd = client_sock } };
-				if (epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, client_sock, &event) == -1)
-				{
-					perror("xbanan: epoll_ctl");
-					close(client_sock);
-					continue;
-				}
+					poller_add(client_sock, event_mask, {
+						.type = Pollable::Type::Client,
+						.data = client.ptr(),
+					});
 
-				dprintln("client {} connected", client_sock);
-				continue;
-			}
+					MUST(g_clients.insert(client_sock, BAN::move(client)));
 
-			auto it = g_epoll_thingies.find(events[i].data.fd);
-			if (it == g_epoll_thingies.end())
-				continue;
-			auto& epoll_thingy = it->value;
-
-			if (epoll_thingy->type == EpollThingy::Type::Event)
-			{
-				g_platform_ops.poll_events(epoll_thingy->value.get<void*>());
-				continue;
-			}
-
-			ASSERT(epoll_thingy->type == EpollThingy::Type::Client);
-
-			auto& client_info = epoll_thingy->value.get<Client>();
-
-			if (events[i].events & EPOLLHUP)
-			{
-				close_client(client_info.fd);
-				continue;
-			}
-
-			if (events[i].events & EPOLLOUT)
-			{
-				const ssize_t nsend = send(
-					client_info.fd,
-					client_info.output_buffer.data(),
-					client_info.output_buffer.size(),
-					0
-				);
-
-				if (nsend == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-					goto send_done;
-
-				if (nsend < 0)
-					perror("xbanan: send");
-				if (nsend <= 0)
-				{
-					close_client(client_info.fd);
-					continue;
-				}
-
-				memmove(
-					client_info.output_buffer.data(),
-					client_info.output_buffer.data() + nsend,
-					client_info.output_buffer.size() - nsend
-				);
-				MUST(client_info.output_buffer.resize(client_info.output_buffer.size() - nsend));
-
-				if (client_info.output_buffer.empty())
-				{
-					uint32_t events = 0;
-					if (g_server_grabber_fd == -1 || g_server_grabber_fd == client_info.fd)
-						events |= EPOLLIN;
-
-					epoll_event event { .events = events, .data = { .fd = client_info.fd } };
-					if (epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
-					{
-						perror("xbanan: epoll_ctl");
-						close_client(client_info.fd);
-						continue;
-					}
-
-					client_info.has_epollout = false;
-				}
-
-			send_done:
-				(void)0;
-			}
-
-			if (!(events[i].events & EPOLLIN))
-				continue;
-
-			if (g_server_grabber_fd != -1 && g_server_grabber_fd != client_info.fd)
-				continue;
-
-			switch (client_info.state)
-			{
-				case Client::State::ConnectionSetup:
-				{
-					xConnClientPrefix client_prefix;
-
-					const ssize_t nrecv = recv(client_info.fd, &client_prefix, sizeof(client_prefix), 0);
-					if (nrecv < 0)
-						perror("xbanan: recv");
-					if (nrecv <= 0)
-					{
-						close_client(client_info.fd);
-						continue;
-					}
-
-					const size_t auth_string_len = (client_prefix.nbytesAuthString + 3) / 4 * 4;
-					const size_t auth_proto_len = (client_prefix.nbytesAuthProto + 3) / 4 * 4;
-					const size_t auth_len = auth_string_len + auth_proto_len;
-
-					size_t auth_received = 0;
-					while (auth_received < auth_len)
-					{
-						char buffer[128];
-
-						const size_t to_recv = BAN::Math::min(sizeof(buffer), auth_len - auth_received);
-						const ssize_t nrecv = recv(client_info.fd, buffer, to_recv, 0);
-						if (nrecv < 0)
-							perror("xbanan: recv");
-						if (nrecv <= 0)
-						{
-							close_client(client_info.fd);
-							continue;
-						}
-						auth_received += nrecv;
-					}
-
-					ASSERT(nrecv == sizeof(client_prefix));
-
-					if (auto ret = setup_client_conneciton(client_info, client_prefix); ret.is_error())
-					{
-						dwarnln("setup_client_connection: {}", ret.error());
-						close_client(client_info.fd);
-						continue;
-					}
-
+					dprintln("client {} connected", client_sock);
 					break;
 				}
-				case Client::State::Connected:
+				case Pollable::Type::Client:
 				{
-					char buffer[1024] {};
+					auto& client_info = *static_cast<Client*>(event.pollable.data);
 
-					const ssize_t nrecv = recv(client_info.fd, buffer, sizeof(buffer), 0);
-					if (nrecv < 0)
-						perror("xbanan: recv");
-					if (nrecv <= 0)
+					if (event.event_mask & (POLLMODE_HUP | POLLMODE_ERR))
 					{
-						close_client(client_info.fd);
-						continue;
+						close_client(event.fd);
+						break;
 					}
 
-					const size_t old_size = client_info.input_buffer.size();
-					MUST(client_info.input_buffer.resize(old_size + nrecv));
-					memcpy(client_info.input_buffer.data() + old_size, buffer, nrecv);
-
-					for (;;)
+					if (event.event_mask & POLLMODE_OUT)
 					{
-						if (client_info.input_buffer.size() < 4)
-							break;
+						const ssize_t nsend = send(
+							client_info.fd,
+							client_info.output_buffer.data(),
+							client_info.output_buffer.size(),
+							0
+						);
 
-						bool is_big_request = false;
-						uint32_t byte_length = 4 * *reinterpret_cast<const uint16_t*>(client_info.input_buffer.data() + 2);
-
-						if (byte_length == 0 && client_info.has_bigrequests)
+						if (nsend == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+							;
+						else if (nsend <= 0)
 						{
-							if (client_info.input_buffer.size() < 8)
-								break;
-							byte_length = 4 * *reinterpret_cast<const uint32_t*>(client_info.input_buffer.data() + 4);
-							is_big_request = true;
-						}
-
-						if (client_info.input_buffer.size() < byte_length)
-							break;
-
-						auto packet = BAN::ConstByteSpan(client_info.input_buffer.span()).slice(0, byte_length);
-						if (is_big_request)
-						{
-							auto* input_u32 = reinterpret_cast<uint32_t*>(client_info.input_buffer.data());
-							input_u32[1] = input_u32[0];
-							packet = packet.slice(4);
-						}
-
-						if (auto ret = handle_packet(client_info, packet); ret.is_error() && ret.error().get_error_code() != ENOENT)
-						{
-							dwarnln("handle_packet: {}", ret.error());
+							if (nsend < 0)
+								perror("xbanan: send");
 							close_client(client_info.fd);
-							continue;
 						}
+						else
+						{
+							memmove(
+								client_info.output_buffer.data(),
+								client_info.output_buffer.data() + nsend,
+								client_info.output_buffer.size() - nsend
+							);
+							MUST(client_info.output_buffer.resize(client_info.output_buffer.size() - nsend));
 
-						memmove(client_info.input_buffer.data(), client_info.input_buffer.data() + byte_length, client_info.input_buffer.size() - byte_length);
-						MUST(client_info.input_buffer.resize(client_info.input_buffer.size() - byte_length));
+							if (client_info.output_buffer.empty())
+								poller_modify(event.fd, 0, POLLMODE_OUT);
+						}
+					}
+
+					if (!(event.event_mask & POLLMODE_IN))
+						break;
+
+					switch (client_info.state)
+					{
+						case Client::State::ConnectionSetup:
+						{
+							xConnClientPrefix client_prefix;
+
+							const ssize_t nrecv = recv(client_info.fd, &client_prefix, sizeof(client_prefix), 0);
+							if (nrecv < 0)
+								perror("xbanan: recv");
+							if (nrecv <= 0)
+							{
+								close_client(client_info.fd);
+								continue;
+							}
+
+							const size_t auth_string_len = (client_prefix.nbytesAuthString + 3) / 4 * 4;
+							const size_t auth_proto_len = (client_prefix.nbytesAuthProto + 3) / 4 * 4;
+							const size_t auth_len = auth_string_len + auth_proto_len;
+
+							size_t auth_received = 0;
+							while (auth_received < auth_len)
+							{
+								char buffer[128];
+
+								const size_t to_recv = BAN::Math::min(sizeof(buffer), auth_len - auth_received);
+								const ssize_t nrecv = recv(client_info.fd, buffer, to_recv, 0);
+								if (nrecv < 0)
+									perror("xbanan: recv");
+								if (nrecv <= 0)
+								{
+									close_client(client_info.fd);
+									continue;
+								}
+								auth_received += nrecv;
+							}
+
+							ASSERT(nrecv == sizeof(client_prefix));
+
+							if (auto ret = setup_client_conneciton(client_info, client_prefix); ret.is_error())
+							{
+								dwarnln("setup_client_connection: {}", ret.error());
+								close_client(client_info.fd);
+								continue;
+							}
+
+							break;
+						}
+						case Client::State::Connected:
+						{
+							char buffer[1024] {};
+
+							const ssize_t nrecv = recv(client_info.fd, buffer, sizeof(buffer), 0);
+							if (nrecv < 0)
+								perror("xbanan: recv");
+							if (nrecv <= 0)
+							{
+								close_client(client_info.fd);
+								continue;
+							}
+
+							const size_t old_size = client_info.input_buffer.size();
+							MUST(client_info.input_buffer.resize(old_size + nrecv));
+							memcpy(client_info.input_buffer.data() + old_size, buffer, nrecv);
+
+							for (;;)
+							{
+								if (client_info.input_buffer.size() < 4)
+									break;
+
+								bool is_big_request = false;
+								uint32_t byte_length = 4 * *reinterpret_cast<const uint16_t*>(client_info.input_buffer.data() + 2);
+
+								if (byte_length == 0 && client_info.has_bigrequests)
+								{
+									if (client_info.input_buffer.size() < 8)
+										break;
+									byte_length = 4 * *reinterpret_cast<const uint32_t*>(client_info.input_buffer.data() + 4);
+									is_big_request = true;
+								}
+
+								if (client_info.input_buffer.size() < byte_length)
+									break;
+
+								auto packet = BAN::ConstByteSpan(client_info.input_buffer.span()).slice(0, byte_length);
+								if (is_big_request)
+								{
+									auto* input_u32 = reinterpret_cast<uint32_t*>(client_info.input_buffer.data());
+									input_u32[1] = input_u32[0];
+									packet = packet.slice(4);
+								}
+
+								if (auto ret = handle_packet(client_info, packet); ret.is_error() && ret.error().get_error_code() != ENOENT)
+								{
+									dwarnln("handle_packet: {}", ret.error());
+									close_client(client_info.fd);
+									continue;
+								}
+
+								memmove(client_info.input_buffer.data(), client_info.input_buffer.data() + byte_length, client_info.input_buffer.size() - byte_length);
+								MUST(client_info.input_buffer.resize(client_info.input_buffer.size() - byte_length));
+							}
+
+							break;
+						}
 					}
 
 					break;
@@ -640,31 +587,6 @@ int main()
 			if (g_platform_ops.end_frame)
 				g_platform_ops.end_frame(window.platform_window.ptr());
 			window.platform_window_invalidated = false;
-		}
-
-	iterator_invalidated:
-		for (auto& [_, thingy] : g_epoll_thingies)
-		{
-			if (thingy->type != EpollThingy::Type::Client)
-				continue;
-
-			auto& client_info = thingy->value.get<Client>();
-			if (client_info.output_buffer.empty() || client_info.has_epollout)
-				continue;
-
-			uint32_t events = EPOLLOUT;
-			if (g_server_grabber_fd == -1 || g_server_grabber_fd == client_info.fd)
-				events |= EPOLLIN;
-
-			epoll_event event { .events = events, .data = { .fd = client_info.fd } };
-			if (epoll_ctl(g_epoll_fd, EPOLL_CTL_MOD, client_info.fd, &event) == -1)
-			{
-				perror("xbanan: epoll_ctl");
-				close_client(client_info.fd);
-				goto iterator_invalidated;
-			}
-
-			client_info.has_epollout = true;
 		}
 	}
 }

@@ -246,16 +246,19 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 					ASSERT_NOT_REACHED();
 			}
 
+			const size_t length = string.size() + 1;
 			xGLXQueryServerStringReply reply {
 				.type = X_Reply,
 				.sequenceNumber = client_info.sequence,
-				.length = static_cast<CARD32>((string.size() + 3) / 4),
-				.n = static_cast<CARD16>(string.size()),
+				.length = static_cast<CARD32>((length + 3) / 4),
+				.n = static_cast<CARD16>(length),
 			};
 			TRY(encode(client_info.output_buffer, reply));
 
 			TRY(encode(client_info.output_buffer, string));
-			for (size_t i = 0; (string.size() + i) % 4; i++)
+			TRY(encode(client_info.output_buffer, '\0'));
+
+			for (size_t i = 0; (length + i) % 4; i++)
 				TRY(encode(client_info.output_buffer, '\0'));
 
 			break;
@@ -401,6 +404,17 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 
 			break;
 		}
+		case X_GLXSetClientInfoARB:
+		{
+			auto request = decode<xGLXSetClientInfoARBReq>(packet).value();
+
+			dprintln("GLXCreateContextAttribsARB");
+			dprintln("  major:       {}", request.major);
+			dprintln("  minor:       {}", request.minor);
+			dprintln("  numVersions: {}", request.numVersions);
+
+			break;
+		}
 		case X_GLXCreateContextAttribsARB:
 		{
 			auto request = decode<xGLXCreateContextAttribsARBReq>(packet).value();
@@ -432,6 +446,17 @@ BAN::ErrorOr<void> extension_glx(Client& client_info, BAN::ConstByteSpan packet)
 					},
 				}))
 			));
+
+			break;
+		}
+		case X_GLXSetClientInfo2ARB:
+		{
+			auto request = decode<xGLXSetClientInfo2ARBReq>(packet).value();
+
+			dprintln("GLXCreateContextAttribs2ARB");
+			dprintln("  major:       {}", request.major);
+			dprintln("  minor:       {}", request.minor);
+			dprintln("  numVersions: {}", request.numVersions);
 
 			break;
 		}

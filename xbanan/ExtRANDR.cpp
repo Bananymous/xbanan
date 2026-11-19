@@ -367,8 +367,8 @@ static BAN::ErrorOr<void> extension_randr(Client& client_info, BAN::ConstByteSpa
 		{
 			auto request = decode<xRRGetCrtcGammaSizeReq>(packet).value();
 
-			dwarnln("RRGetCrtcGammaSize");
-			dwarnln("  crtc:            {}", request.crtc);
+			dprintln("RRGetCrtcGammaSize");
+			dprintln("  crtc:            {}", request.crtc);
 
 			xRRGetCrtcGammaSizeReply reply {
 				.type = X_Reply,

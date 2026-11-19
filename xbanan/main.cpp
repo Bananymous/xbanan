@@ -97,7 +97,7 @@ BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
 ATOM g_atom_value = XA_LAST_PREDEFINED + 1;
 
 int g_epoll_fd;
-BAN::HashMap<int, EpollThingy> g_epoll_thingies;
+BAN::HashMap<int, BAN::UniqPtr<EpollThingy>> g_epoll_thingies;
 
 int g_server_grabber_fd = -1;
 
@@ -320,8 +320,8 @@ int main()
 		[](int client_fd)
 		{
 			auto& epoll_thingy = g_epoll_thingies[client_fd];
-			ASSERT(epoll_thingy.type == EpollThingy::Type::Client);
-			auto& client_info = epoll_thingy.value.get<Client>();
+			ASSERT(epoll_thingy->type == EpollThingy::Type::Client);
+			auto& client_info = epoll_thingy->value.get<Client>();
 
 			dprintln("client {} disconnected", client_fd);
 
@@ -383,10 +383,10 @@ int main()
 
 				for (const auto& [_, thingy] : g_epoll_thingies)
 				{
-					if (thingy.type != EpollThingy::Type::Client)
+					if (thingy->type != EpollThingy::Type::Client)
 						continue;
 
-					auto& other_client = thingy.value.get<Client>();
+					auto& other_client = thingy->value.get<Client>();
 
 					uint32_t events = EPOLLIN;
 					if (other_client.has_epollout)
@@ -423,14 +423,14 @@ int main()
 					client_pid = client_cred.pid;
 #endif
 
-				MUST(g_epoll_thingies.insert(client_sock, {
+				MUST(g_epoll_thingies.insert(client_sock, MUST(BAN::UniqPtr<EpollThingy>::create(EpollThingy {
 					.type = EpollThingy::Type::Client,
 					.value = Client {
 						.fd = client_sock,
 						.state = Client::State::ConnectionSetup,
 						.pid = client_pid,
 					}
-				}));
+				}))));
 
 				uint32_t events = 0;
 				if (g_server_grabber_fd == -1)
@@ -453,15 +453,15 @@ int main()
 				continue;
 			auto& epoll_thingy = it->value;
 
-			if (epoll_thingy.type == EpollThingy::Type::Event)
+			if (epoll_thingy->type == EpollThingy::Type::Event)
 			{
-				g_platform_ops.poll_events(epoll_thingy.value.get<void*>());
+				g_platform_ops.poll_events(epoll_thingy->value.get<void*>());
 				continue;
 			}
 
-			ASSERT(epoll_thingy.type == EpollThingy::Type::Client);
+			ASSERT(epoll_thingy->type == EpollThingy::Type::Client);
 
-			auto& client_info = epoll_thingy.value.get<Client>();
+			auto& client_info = epoll_thingy->value.get<Client>();
 
 			if (events[i].events & EPOLLHUP)
 			{
@@ -645,10 +645,10 @@ int main()
 	iterator_invalidated:
 		for (auto& [_, thingy] : g_epoll_thingies)
 		{
-			if (thingy.type != EpollThingy::Type::Client)
+			if (thingy->type != EpollThingy::Type::Client)
 				continue;
 
-			auto& client_info = thingy.value.get<Client>();
+			auto& client_info = thingy->value.get<Client>();
 			if (client_info.output_buffer.empty() || client_info.has_epollout)
 				continue;
 

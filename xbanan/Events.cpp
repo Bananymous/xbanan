@@ -14,10 +14,10 @@ void register_event_fd(int fd, void* data)
 	epoll_event event { .events = EPOLLIN, .data = { .fd = fd } };
 	epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, fd, &event);
 
-	MUST(g_epoll_thingies.insert(fd, {
+	MUST(g_epoll_thingies.insert(fd, MUST(BAN::UniqPtr<EpollThingy>::create(EpollThingy {
 		.type = EpollThingy::Type::Event,
 		.value = data,
-	}));
+	}))));
 }
 
 void unregister_event_fd(int fd)

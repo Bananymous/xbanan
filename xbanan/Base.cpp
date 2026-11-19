@@ -1832,9 +1832,9 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 			Client* target_client = nullptr;
 			for (auto& [_, thingy] : g_epoll_thingies)
 			{
-				if (thingy.type != EpollThingy::Type::Client)
+				if (thingy->type != EpollThingy::Type::Client)
 					continue;
-				auto& other_client = thingy.value.get<Client>();
+				auto& other_client = thingy->value.get<Client>();
 				if (!other_client.objects.contains(wid))
 					continue;
 				target_client = &other_client;
@@ -1957,10 +1957,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			for (const auto& [_, thingy] : g_epoll_thingies)
 			{
-				if (thingy.type != EpollThingy::Type::Client)
+				if (thingy->type != EpollThingy::Type::Client)
 					continue;
 
-				auto& other_client = thingy.value.get<Client>();
+				auto& other_client = thingy->value.get<Client>();
 				if (client_info.fd == other_client.fd)
 					continue;
 
@@ -1980,10 +1980,10 @@ BAN::ErrorOr<void> handle_packet(Client& client_info, BAN::ConstByteSpan packet)
 
 			for (const auto& [_, thingy] : g_epoll_thingies)
 			{
-				if (thingy.type != EpollThingy::Type::Client)
+				if (thingy->type != EpollThingy::Type::Client)
 					continue;
 
-				auto& other_client = thingy.value.get<Client>();
+				auto& other_client = thingy->value.get<Client>();
 				if (client_info.fd == other_client.fd)
 					continue;
 

@@ -9,10 +9,10 @@ static BAN::ErrorOr<void> for_each_client(uint32_t target_spec, const F& callbac
 {
 	for (const auto& [fd, thingy] : g_epoll_thingies)
 	{
-		if (thingy.type != EpollThingy::Type::Client)
+		if (thingy->type != EpollThingy::Type::Client)
 			continue;
 
-		const auto& client_info = thingy.value.get<Client>();
+		const auto& client_info = thingy->value.get<Client>();
 		if (target_spec && (target_spec >> 20) != client_info.fd)
 			continue;
 

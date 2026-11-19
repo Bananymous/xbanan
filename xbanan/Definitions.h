@@ -182,7 +182,7 @@ extern BAN::HashMap<ATOM, BAN::String> g_atoms_id_to_name;
 extern ATOM g_atom_value;
 
 extern int g_epoll_fd;
-extern BAN::HashMap<int, EpollThingy> g_epoll_thingies;
+extern BAN::HashMap<int, BAN::UniqPtr<EpollThingy>> g_epoll_thingies;
 
 extern int g_server_grabber_fd;
 
